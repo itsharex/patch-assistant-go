@@ -1,0 +1,19 @@
+NONE	PatchAssistant2J	补丁说明示例		补丁说明示例/PatchAssistant2J
+NONE	形式	A		A/形式
+NONE	app/BOOT-INF/classes/com/demo/NewService.class			app/BOOT-INF/classes/com/demo/NewService.class
+NONE	app/BOOT-INF/classes/com/demo/OldService.class			app/BOOT-INF/classes/com/demo/OldService.class
+NONE	-	app/BOOT-INF/classes/com/demo/Removed.class		app/BOOT-INF/classes/com/demo/Removed.class/-
+NONE	app/BOOT-INF/classes/com/demo/Ignore.class			app/BOOT-INF/classes/com/demo/Ignore.class
+NONE	形式	B		B/形式
+ADD	app/BOOT-INF/classes/com/demo/NewService.class			app/BOOT-INF/classes/com/demo/NewService.class
+MOD	app/BOOT-INF/classes/com/demo/OldService.class			app/BOOT-INF/classes/com/demo/OldService.class
+DEL	app/BOOT-INF/classes/com/demo/Removed.class			app/BOOT-INF/classes/com/demo/Removed.class
+IGNORE	app/BOOT-INF/classes/com/demo/Ignore.class			app/BOOT-INF/classes/com/demo/Ignore.class
+NONE	形式	C		C/形式
+MOD	app/BOOT-INF/classes/com/demo/OldService.class	BOOT-INF/classes/com/demo/OldService.class		BOOT-INF/classes/com/demo/OldService.class
+NONE	形式	D		D/形式
+MOD	app/BOOT-INF/classes/com/demo/A.class	BOOT-INF/classes	com/demo/B.class	BOOT-INF/classes/com/demo/B.class/A.class
+NONE	形式	E		E/形式
+NONE	app/BOOT-INF/classes/com/demo/Plain.class			app/BOOT-INF/classes/com/demo/Plain.class
+NONE	形式	F		F/形式
+ADD	abs/path/with/slash.class			abs/path/with/slash.class

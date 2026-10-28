@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "PatchAssistant2J",
+  "outputfilename": "PatchAssistant2J",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "CPoet"
+  },
+  "info": {
+    "companyName": "PatchAssistant2J",
+    "productName": "PatchAssistant2J",
+    "productVersion": "1.4.7",
+    "copyright": "Copyright [2025] [CPoet]",
+    "comments": "Java 版 PatchAssistant2J 的 Go 移植"
+  }
+}

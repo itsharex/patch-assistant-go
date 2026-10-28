@@ -1,0 +1,3074 @@
+/* PatchAssistant2J —— 桌面工具风格：密度优先、克制配色、小圆角。
+   刻意避开"渐变 + 玻璃拟态 + 大圆角"那套，做得像一个真的开发工具。
+
+   2026-10-14 做了一轮"现代工具风"美化，只动**窗口外观层**：
+   工具栏 / 面板头 / 树行 / 状态栏 / 补丁信息 / 弹窗 / 滚动条。
+   三处**刻意没动**，因为它们有像素级校验锁着：
+     · 代码预览区（白底 + 行号色 + 语法高亮）—— 对齐原版 theme.css，有黄金基准；
+     · 双栏差异的行底色与 ＋/－/~ 符号 —— 走查按 RGB 逐条钉死；
+     · 树里"增/改/删"那套语义色（--add / --mod / --del 及其浅色底）。
+   美化后走查 219 条仍全绿（走查里锁着这些值，改坏了会直接红）。 */
+
+/* ============================ 主题 ============================
+   当前：亮色。
+
+   所有与明暗相关的颜色都收在这一个块里，别处只引用变量 ——
+   要换回暗色主题，改这一块就够了。
+
+   唯一的例外是 gui/main.go 里的 BackgroundColour：它决定窗口出现那一瞬
+   的底色，必须跟着 --bg 一起改，否则启动时会闪一下。
+
+   注意两个变量在亮色下的"方向"和暗色是反的：
+     --accent-hi  暗色下是"更亮"（#4a8cea），亮色下要"更深"（#2159ac），
+                  因为它同时被用作 hover 态和需要更重对比的文字色；
+     --hover      同理，亮色下悬停是加深而不是提亮。
+   因此 --surface-3 不再兼任悬停态（它只管浮层），悬停单独给了 --hover。 */
+:root {
+  /* 底色与层 */
+  --bg:          #f5f7fa;   /* 画布：树所在的大背景 */
+  --surface:     #ffffff;   /* 工具栏 / 状态栏 / 面板头 */
+  --surface-2:   #f1f4f8;   /* 按钮静止态、树行悬停 */
+  --surface-3:   #ffffff;   /* 浮层：右键菜单、提示条 */
+  --hover:       #e9eef5;   /* 交互悬停 */
+  --active:      #e2e8f0;   /* 按下 */
+  --row-sel:     #dbe8fd;   /* 树行选中 */
+  /* 按钮静止态的底色。比 --surface 略灰一点点，配合 .btn 上那层
+     "顶部白 → 透明"的半透明渐变做出一点厚度；静止时看着还是白的。 */
+  --btn-face:    #f8fafd;
+
+  /* 描边 */
+  --border:      #e6eaf1;
+  --border-hi:   #d2d9e3;
+  --btn-edge:    #c3ccda;   /* 按钮悬停时的描边，比 --border-hi 深一档 */
+
+  /* 文字 */
+  --text:        #16191e;
+  --text-dim:    #4d5663;
+  /* ⚠️ --text-mute 是"修改时间 / 大小 / MD5"那三列的颜色。
+     用户明确要求 MD5 列"完全不动"，所以这个值**保持原样**，
+     不跟着这轮调色一起动。改它等于动了那三列。 */
+  --text-mute:   #868f9a;
+
+  /* 主色 */
+  --accent:       #2563eb;
+  --accent-hi:    #1d4ed8;
+  --accent-press: #1a43c0;   /* 主按钮按下：比 --accent-hi 再深一档 */
+  --accent-soft:  rgba(37, 99, 235, .08);
+  /* 差异导航"当前块"铺的那层极淡底色。刻意比 --accent-soft 重一点点：
+     它要盖在 mark-* 的语义底色**上面**还能看出来，但又不许抢正文。 */
+  --nav-wash:     rgba(37, 99, 235, .10);
+
+  /* 变更状态。⚠️ 这几枚（含下面的浅底）被走查按 RGB 逐条钉着，
+     不是"随便调一下更好看"的地方 —— 它们是"补丁对这个文件做了什么"
+     的语义色，与语法高亮、行底色一起构成那套判定锚点。
+
+     2026-10-23 按用户要求换成 **IDEA 那套语义**：
+       新增 = 绿（没动）／ 删除 = **灰**（原来是红）／ 更新 = **浅蓝**（原来是琥珀）。
+     用户原话："新增是绿色、删除是灰色、更新是浅蓝色。样式改成和 idea 一样的"。
+
+     ⚠️ 从此 `--del` **只表示"这行被删了"**，不再兼任"危险操作"的红 ——
+     灰底红字的删除按钮会让"不可逆"这件事失去警示。破坏性 UI 另起
+     `--danger` / `--danger-bg` / `--danger-line`（见下面那段）。
+     两者的分界线：**描述状态用 --del，描述"点了会出事"用 --danger**。 */
+  --add:         #1a7f37;
+  --mod:         #1f6fb2;   /* 更新：IDEA 的 changed 是青蓝，不是琥珀 */
+  --del:         #6e7781;   /* 删除：中性灰 */
+  /* 双栏差异行的**行底色**（浅到不抢正文，又要一眼看出整行属于哪一档）。
+     删除那档刻意用**中性灰**（不带蓝调）—— 带蓝调会跟 --row-sel / --mod-bg
+     混成一片，用户就分不出"选中的行"和"被删的行"了。 */
+  --add-bg:      #dafbe1;
+  --mod-bg:      #d9ecfa;
+  --del-bg:      #e3e5e8;
+  --readme:      #4c6ea8;
+  --readme-soft: rgba(76, 110, 168, .10);   /* README 行的底色：能看出来又不吵 */
+  --del-line:    #b6bcc4;   /* 删除线的颜色：比 --del 淡，不抢正文 */
+
+  /* 破坏性动作（删除节点、撤销删除、非法输入）。这抹红**不再兼职 diff**，
+     只在"点下去不可逆 / 当前输入有问题"的地方出现。 */
+  --danger:       #cf222e;
+  --danger-hover: #b81f2b;
+  --danger-press: #a11a25;
+  --danger-bg:    #ffebe9;
+  --danger-line:  #e8a5aa;
+
+  --icon-dir:    #8a94a0;
+
+  /* 滚动条 */
+  --scroll-thumb:    #c2cad6;
+  --scroll-thumb-hi: #a8b2c0;
+
+  /* 浮层投影与遮罩。三级：静态控件的贴边阴影 / 浮层 / 大浮层。 */
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
+  --shadow:    0 6px 20px rgba(16, 24, 40, .10), 0 1px 3px rgba(16, 24, 40, .06);
+  --shadow-lg: 0 18px 48px rgba(16, 24, 40, .16), 0 2px 6px rgba(16, 24, 40, .06);
+  --scrim:     rgba(15, 20, 28, .38);
+  /* 状态栏向上投的那道细影：把工具栏和内容区轻轻分开。
+     单独一个变量而不是复用 --shadow-sm：那个是"控件四周一圈"，
+     这里只往上一面，且强度弱得多。暗色主题必须翻成深色投影，
+     否则深色界面上是一道发灰的脏边。 */
+  --bar-shadow: 0 -1px 2px rgba(16, 24, 40, .04);
+
+  /* 圆角。三级够用：小控件 / 菜单与浮层 / 对话框。 */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+
+  /* 错误提示 */
+  --err-text:   #a40e26;
+  --err-border: #e8a5aa;
+
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --ui: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  /* --sans 是 --ui 的别名。曾经只在 .contentwin-err-head 里引用过它、
+     却没定义 —— `font: 600 12px var(--sans)` 整条声明会被判为无效而丢弃，
+     编译错误标题于是**悄悄退回继承字号**。定义在这里，别再删。 */
+  --sans: var(--ui);
+
+  /* --------------------------------------------- 以下这批是"补写成令牌"的少数派
+     上面那批变量覆盖了绝大部分配色，但历史上还有一小撮颜色是**直接写字**的：
+     代码区白底与行号栏、.btn 那层"顶部白 → 透明"的渐变、主/危险按钮的投影、
+     两棵树的映射连线圆点、「拖入的文件」三枚状态药丸、以及从未定义过的
+     var(--warn, …)。它们不走变量，所以暗色主题压不动 —— 只能在这里补成变量。
+
+     ⚠️ 亮色取值与写死时**一字不差**（连注释里那套"这是原版 theme.css 的
+     三件套"的说法都仍然成立）。补完之后亮色渲染逐像素不变，走查与
+     计算样式比对一起兜着；换肤时才真正用上它们。 */
+  --code-bg:      #ffffff;   /* 代码预览区底色 */
+  --code-ln:      #aeb3c2;   /* 行号字色 */
+  --code-ln-edge: #ebecf0;   /* 行号栏右侧竖线 */
+
+  /* .btn 的"厚度"：顶部半透明渐变 + 顶部内高光 + 底部内暗影 + 一层外投影，
+     按下换成内凹。四个分层都要能跟着明暗翻面。 */
+  --btn-gloss:        rgba(255, 255, 255, .92);
+  --btn-hi:           #ffffff;
+  --btn-lo:           rgba(16, 24, 40, .035);
+  --btn-shadow:       0 1px 2px rgba(16, 24, 40, .08);
+  --btn-shadow-hi:    0 2px 4px rgba(16, 24, 40, .10);
+  --btn-shadow-press: inset 0 2px 4px rgba(16, 24, 40, .13);
+
+  /* 主按钮 / 危险按钮的同一套"厚度"。底色更亮（--accent / --del），
+     所以内暗影换成蓝色系（而不是 .btn 那套灰色系）。 */
+  --lit-hi:           rgba(255, 255, 255, .26);
+  --lit-lo:           rgba(9, 30, 66, .18);
+  --lit-shadow:       0 1px 2px rgba(37, 99, 235, .35);
+  --lit-shadow-hi:    0 2px 5px rgba(37, 99, 235, .40);
+  --lit-shadow-press: inset 0 2px 5px rgba(9, 30, 66, .38);
+  --danger-hi:           rgba(255, 255, 255, .18);
+  --danger-lo:           rgba(0, 0, 0, .10);
+  --danger-shadow:       0 1px 2px rgba(16, 24, 40, .12);
+  --danger-shadow-press: inset 0 2px 4px rgba(0, 0, 0, .20);
+
+  /* 两棵树之间的映射连线。 */
+  --link-dim: #9fbdf5;   /* 非当前那一对：淡一档，但不能淡到看不见 */
+  --link-dot: #ffffff;   /* 连线端点的小圆点 */
+
+  /* 「拖入的文件」四枚状态药丸：未定位（橙）/ 已替换（绿）/ 已加入（蓝）/
+     内容相同（中性灰 —— 它不是"做成了什么"，而是"确认无需改动"）。 */
+  --state-pending:      #b26a00;
+  --state-pending-bg:   #fff4e0;
+  --state-pending-edge: #f3d29a;
+  --state-ok:           #1f7a3d;
+  --state-ok-bg:        #e3f6e8;
+  --state-ok-edge:      #aeddb9;
+  --state-info:         #1f5ea8;
+  --state-info-bg:      #e4eefb;
+  --state-info-edge:    #aaccea;
+  --state-same:         #5b6675;
+  --state-same-bg:      #eef0f3;
+  --state-same-edge:    #d2d7de;
+
+  /* --warn 以前是 `var(--warn, #b06a12)` 的兜底值 —— 变量从来没定义过，
+     等于写死还写得看不出来。这里正式定义，引用处的兜底可以去掉。 */
+  --warn:      #b06a12;
+  --warn-edge: #d08a3e;
+  --warn-soft: rgba(208, 138, 62, .1);
+}
+
+/* ============================ 暗色主题 ============================
+   用法：`<html data-theme="oled">` 或 `<html data-theme="graphite">`。
+   由 app.js 的 applyTheme 改这个属性，取值落在 localStorage（Go 版 GUI
+   没有配置文件，设置项本来就全是会话级的 —— 见 gui/app.go 里
+   ApplySettings 的说明；主题比别的设置更值得记住，所以放前端存储而不是
+   会话字段）。
+
+   这里**只覆盖变量**、不重写规则：.code / .btn / .btn-primary /
+   .btn-danger / .links / .dropfile-state-* / .pane-badge.is-miss 那些
+   规则引用的都是上边那批令牌，所以换主题 = 换变量的值。
+
+   唯一不能纯靠变量的是语法高亮：原版那套是照抄 JavaFX *-style.css 的
+   命名色（purple / blue / darkgreen / firebrick / teal），**深底上不可读**，
+   所以按语言逐个覆写（见两块末尾的 .lang-*）。
+
+   ⚠️ --accent-hi 与 --hover 在暗色下的"方向"和亮色相反（见 :root 上方
+   的说明）：暗色里悬停是提亮、accent-hi 要更亮。
+
+   两套暗色的分工（用户 2026-10-21 看过三套预览图后定下的）：
+     oled      —— 纯黑画布 + 近黑面板，对比最烈，OLED 屏上不发光；
+     graphite  —— 中性石墨灰，层次柔和，和 IDE 默认暗色一个路子。
+   两套的差别**只在变量值**，规则完全共用。 */
+:root[data-theme="oled"] {
+  /* 底色与层。纯黑画布 + 近黑面板：对比最烈，OLED 上不发光。
+     面板之间不靠色相差、靠 --border 分界。 */
+  --bg:          #000000;
+  --surface:     #0c0e11;   /* 工具栏 / 状态栏 / 面板头 */
+  --surface-2:   #15181c;   /* 按钮静止态、树行悬停 */
+  --surface-3:   #101317;   /* 浮层：右键菜单、提示条 */
+  --hover:       #1b1f24;
+  --active:      #23282e;
+  --row-sel:     #10243a;
+  --btn-face:    #12161a;
+
+  /* 描边。暗底下边框比亮色更"实"一些，否则面板会糊成一团。 */
+  --border:      #24282e;
+  --border-hi:   #333941;
+  --btn-edge:    #3c444c;
+
+  /* 文字。亮色里 --text 是最深的，暗色里翻成最浅的。 */
+  --text:        #f2f4f8;
+  --text-dim:    #c2c8d2;
+  --text-mute:   #8b929d;   /* "修改时间/大小/MD5"三列，用户要求这列值不动 */
+
+  /* 主色。亮色下 --accent-hi 要比 --accent **更深**（hover 加重对比），
+     暗色下反过来：更亮。 */
+  --accent:       #6ea3ff;
+  --accent-hi:    #7aabff;
+  --accent-press: #4478e0;
+  --accent-soft:  rgba(110, 163, 255, .18);
+  --nav-wash:     rgba(110, 163, 255, .12);
+
+  /* 变更状态。亮色下那套是浅底深字，这里翻成深底浅字；
+     --add/--mod/--del 仍是"补丁对这个文件做了什么"的语义色。
+     语义同亮色（2026-10-23 换成 IDEA 那套）：新增绿 / 删除灰 / 更新浅蓝。 */
+  --add:         #46c463;
+  --mod:         #5aa9e6;
+  --del:         #98a2ae;
+  --add-bg:      rgba(70, 196, 99, .14);
+  --mod-bg:      rgba(90, 169, 230, .16);
+  --del-bg:      rgba(152, 162, 174, .16);
+  --readme:      #7fb0f5;
+  --readme-soft: rgba(127, 176, 245, .14);
+  --del-line:    #6f7885;
+
+  /* 破坏性动作：红只留给"点了不可逆"的地方（见 :root 那段分界说明）。 */
+  --danger:       #ff6b62;
+  --danger-hover: #ff8a82;
+  --danger-press: #e0564e;
+  --danger-bg:    rgba(255, 107, 98, .14);
+  --danger-line:  #c9737d;
+
+  --icon-dir:    #8e99a6;
+
+  /* 滚动条 */
+  --scroll-thumb:    #3d444f;
+  --scroll-thumb-hi: #4c5563;
+
+  /* 投影。亮色底下"浮起来"靠的是给暗色投影；纯黑画布上反过来了 ——
+     投影要更重，否则浮层和画布分不开。（--scrim 同样加重。） */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .40);
+  --shadow:    0 6px 20px rgba(0, 0, 0, .50), 0 1px 3px rgba(0, 0, 0, .40);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, .60), 0 2px 6px rgba(0, 0, 0, .40);
+  --scrim:     rgba(0, 0, 0, .72);
+  --bar-shadow: 0 -1px 2px rgba(0, 0, 0, .50);
+
+  /* 错误提示 */
+  --err-text:   #ff807a;
+  --err-border: #7a2d28;
+
+  /* ---- 下边是"补写成令牌"的那批少数派 ---- */
+  /* 代码区。比画布再深一档（#070809），行号栏同一底色，隔开靠那条竖线。 */
+  --code-bg:      #070809;
+  --code-ln:      #6f7885;
+  --code-ln-edge: #262a31;
+
+  /* .btn 的"厚度"：亮色下靠"白底 + 白顶光"显得凸起，暗底下白顶光一强就
+     发灰，所以压到 6~10%，再把底部内暗影换成纯黑（而不是亮色那套灰蓝）。 */
+  --btn-gloss:        rgba(255, 255, 255, .06);
+  --btn-hi:           rgba(255, 255, 255, .10);
+  --btn-lo:           rgba(0, 0, 0, .35);
+  --btn-shadow:       0 1px 2px rgba(0, 0, 0, .40);
+  --btn-shadow-hi:    0 2px 4px rgba(0, 0, 0, .45);
+  --btn-shadow-press: inset 0 2px 4px rgba(0, 0, 0, .50);
+
+  /* 主 / 危险按钮底色是实色（--accent / --del），白顶光可以比 .btn 留得多
+     一点（22%），否则按钮会显得比旁边的普通按钮还平。 */
+  --lit-hi:           rgba(255, 255, 255, .22);
+  --lit-lo:           rgba(0, 0, 0, .18);
+  --lit-shadow:       0 1px 2px rgba(0, 0, 0, .40);
+  --lit-shadow-hi:    0 2px 4px rgba(0, 0, 0, .45);
+  --lit-shadow-press: inset 0 2px 4px rgba(0, 0, 0, .45);
+  --danger-hi:           rgba(255, 255, 255, .22);
+  --danger-lo:           rgba(0, 0, 0, .18);
+  --danger-shadow:       0 1px 2px rgba(0, 0, 0, .40);
+  --danger-shadow-press: inset 0 2px 4px rgba(0, 0, 0, .45);
+
+  /* 映射连线。端点圆点在亮色下是白的（压在浅色树上才显），暗树要换成浅灰；
+     淡档那一对也要跟着提亮，否则整条线会沉进背景里。 */
+  --link-dim: #4c5563;
+  --link-dot: #c9d2e0;
+
+  /* 四枚状态药丸：浅底深字 → 深底浅字（底色用同色系的低透明度）。
+     "未定位"那枚是警示性质，四档里最亮；"内容相同"最淡 —— 它只是说明
+     什么也没发生。 */
+  --state-pending:      #e0a95f;
+  --state-pending-bg:   rgba(208, 138, 62, .16);
+  --state-pending-edge: #7a5a2e;
+  --state-ok:           #63c37d;
+  --state-ok-bg:        rgba(70, 196, 99, .14);
+  --state-ok-edge:      #2f5b3c;
+  --state-info:         #7aa9f0;
+  --state-info-bg:      rgba(91, 149, 255, .14);
+  --state-info-edge:    #33486e;
+  --state-same:         #98a2b0;
+  --state-same-bg:      rgba(140, 150, 165, .16);
+  --state-same-edge:    #4a525e;
+
+  --warn:      #d9a52c;   /* "有个待办/没匹配上"的语气。
+                             2026-10-23 起**不再与 --mod 同源** —— --mod 变成
+                             了更新的青蓝，而警告必须是琥珀，两者语义不同。 */
+  --warn-edge: #7a5a2e;
+  --warn-soft: rgba(208, 138, 62, .16);
+}
+
+/* ---------------------------------------------- 暗色下的语法高亮
+
+   原版每个语言一份 *-style.css（java-style.css / javascript-style.css /
+   html-style.css / css-style.css / xml-style.css / yaml-style.css /
+   sql-style.css），颜色全是给**白底**调的。Go 侧的 app.css 逐条照抄了它们，
+   所以这里不能"改个底色就完事" —— purple / blue / darkgreen / firebrick /
+   teal 在深底上要么糊要么刺眼，必须整套换。
+
+   新配色取"暗底可读"的常用映射：关键字紫、括号红、方括号/花括号青、
+   字符串绿、注释灰、标点浅灰、属性名橙。
+
+   yaml-style.css 那套本来就是 VS Code Dark+ 的取值（#569CD6 / #CE9178 /
+   #6A9955 …），放在暗底上恰恰好，**原样保留**，这里不覆写。 */
+:root[data-theme="oled"] .lang-java .keyword   { color: #d8a6ff; }
+:root[data-theme="oled"] .lang-java .paren     { color: #ff8a92; }
+:root[data-theme="oled"] .lang-java .bracket   { color: #6fd6e8; }
+:root[data-theme="oled"] .lang-java .brace     { color: #6fd6e8; }
+:root[data-theme="oled"] .lang-java .string    { color: #a8e68a; }
+:root[data-theme="oled"] .lang-java .comment   { color: #8b95a3; }
+:root[data-theme="oled"] .lang-java .semicolon { color: #c4cbd6; }
+
+:root[data-theme="oled"] .lang-javascript .keyword   { color: #d8a6ff; }
+:root[data-theme="oled"] .lang-javascript .string    { color: #a8e68a; }
+:root[data-theme="oled"] .lang-javascript .comment   { color: #8b95a3; }
+:root[data-theme="oled"] .lang-javascript .paren     { color: #ff8a92; }
+:root[data-theme="oled"] .lang-javascript .brace     { color: #6fd6e8; }
+:root[data-theme="oled"] .lang-javascript .bracket   { color: #6fd6e8; }
+:root[data-theme="oled"] .lang-javascript .semicolon { color: #c4cbd6; }
+
+:root[data-theme="oled"] .lang-html .html-tag       { color: #ff8a92; }
+:root[data-theme="oled"] .lang-html .html-attribute { color: #e0a95f; }
+:root[data-theme="oled"] .lang-html .html-string    { color: #a8e68a; }
+:root[data-theme="oled"] .lang-html .html-comment   { color: #8b95a3; }
+:root[data-theme="oled"] .lang-html .html-doctype   { color: #d8a6ff; }
+
+:root[data-theme="oled"] .lang-css .keyword     { color: #d8a6ff; }
+:root[data-theme="oled"] .lang-css .selector    { color: #ff8a92; }
+:root[data-theme="oled"] .lang-css .property    { color: #e0a95f; }
+:root[data-theme="oled"] .lang-css .value       { color: #a8e68a; }
+:root[data-theme="oled"] .lang-css .punctuation,
+:root[data-theme="oled"] .lang-css .terminator  { color: #c4cbd6; }
+:root[data-theme="oled"] .lang-css .comment     { color: #8b95a3; }
+
+:root[data-theme="oled"] .lang-xml .xml-tag       { color: #ff8a92; }
+:root[data-theme="oled"] .lang-xml .xml-attribute { color: #e0a95f; }
+:root[data-theme="oled"] .lang-xml .xml-string    { color: #a8e68a; }
+:root[data-theme="oled"] .lang-xml .xml-comment   { color: #8b95a3; }
+
+/* sql-style.css 在原版里也是白底取值（#0000FF / #008000 / #FF4500），
+   与上边同一套映射。 */
+:root[data-theme="oled"] .lang-sql .keyword { color: #d8a6ff; }
+:root[data-theme="oled"] .lang-sql .string  { color: #a8e68a; }
+:root[data-theme="oled"] .lang-sql .number  { color: #e0a95f; }
+:root[data-theme="oled"] .lang-sql .comment { color: #8b95a3; }
+
+/* ---------------------------------------------- 石墨 Graphite
+
+   与 oled 的唯一区别是**变量值**：中性深灰底、层次更柔、强调色收一档。
+   取值出自 .workbuddy-ai/mockups/make_theme_preview.py 的"方案 A ——
+   石墨 Graphite"，和 oled 是同一批预览图里用户一起选下来的。 */
+:root[data-theme="graphite"] {
+  /* 底色与层。中性石墨灰：不偏蓝不偏暖，久看不累；
+     面板之间不靠色相差、靠 --border 分界（和 oled 同一套描边思路）。 */
+  --bg:          #17191d;
+  --surface:     #1f2228;   /* 工具栏 / 状态栏 / 面板头 */
+  --surface-2:   #262a31;   /* 按钮静止态、树行悬停 */
+  --surface-3:   #23272e;   /* 浮层：右键菜单、提示条 */
+  --hover:       #2b313a;
+  --active:      #353d48;
+  --row-sel:     #27313f;
+  --btn-face:    #23272e;
+
+  /* 描边。与 oled 同一思路：暗底下边框要"实"，否则面板糊成一团。 */
+  --border:      #2f343c;
+  --border-hi:   #3d444e;
+  --btn-edge:    #48505b;
+
+  /* 文字。亮色里 --text 是最深的，暗色里翻成最浅的。 */
+  --text:        #e7eaf0;
+  --text-dim:    #b3bac6;
+  --text-mute:   #8b929d;   /* "修改时间/大小/MD5"三列，用户要求这列值不动 */
+
+  /* 主色。与 oled 同方向的规则：暗色下 --accent-hi 要更亮。 */
+  --accent:       #5b95ff;
+  --accent-hi:    #7aabff;
+  --accent-press: #4478e0;
+  --accent-soft:  rgba(91, 149, 255, .16);
+  --nav-wash:     rgba(91, 149, 255, .12);
+
+  /* 变更状态。两套暗色共用同一组语义色 —— "补丁对这个文件做了什么"
+     不该随主题变，否则用户换一次主题就要重新认一遍颜色。 */
+  --add:         #46c463;
+  --mod:         #5aa9e6;
+  --del:         #98a2ae;
+  --add-bg:      rgba(70, 196, 99, .14);
+  --mod-bg:      rgba(90, 169, 230, .16);
+  --del-bg:      rgba(152, 162, 174, .16);
+  --readme:      #7fb0f5;
+  --readme-soft: rgba(127, 176, 245, .14);
+  --del-line:    #6f7885;
+
+  /* 破坏性动作：红只留给"点了不可逆"的地方（见 :root 那段分界说明）。 */
+  --danger:       #ff6b62;
+  --danger-hover: #ff8a82;
+  --danger-press: #e0564e;
+  --danger-bg:    rgba(255, 107, 98, .14);
+  --danger-line:  #c9737d;
+
+  --icon-dir:    #8e99a6;
+
+  /* 滚动条 */
+  --scroll-thumb:    #3d444f;
+  --scroll-thumb-hi: #4c5563;
+
+  /* 投影。与 oled 同值：都是深色画布，投影要重才分得开浮层和底。
+     （--scrim 比 oled 略浅 —— 石墨的画布本身没到底，遮罩不必压那么死。） */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .40);
+  --shadow:    0 6px 20px rgba(0, 0, 0, .50), 0 1px 3px rgba(0, 0, 0, .40);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, .60), 0 2px 6px rgba(0, 0, 0, .40);
+  --scrim:     rgba(0, 0, 0, .58);
+  --bar-shadow: 0 -1px 2px rgba(0, 0, 0, .45);
+
+  /* 错误提示 */
+  --err-text:   #ff807a;
+  --err-border: #7a2d28;
+
+  /* ---- 下边是"补写成令牌"的那批少数派 ---- */
+  /* 代码区。石墨画布是 #17191d，代码面板压到 #12141a —— 仍比画布深一档，
+     但不像 oled 那样一路压到近黑。 */
+  --code-bg:      #12141a;
+  --code-ln:      #6f7885;
+  /* ⚠️ 这一条与 oled 不同：石墨的 --surface-2 正好就是 #262a31，
+     行号栏分隔线再用那个值会和两侧糊在一起，所以取 --border 那一档。 */
+  --code-ln-edge: #2f343c;
+
+  /* .btn 的"厚度"：与 oled 同一套口径 —— 白顶光压到 6~10%，
+     底部内暗影用纯黑。 */
+  --btn-gloss:        rgba(255, 255, 255, .06);
+  --btn-hi:           rgba(255, 255, 255, .10);
+  --btn-lo:           rgba(0, 0, 0, .35);
+  --btn-shadow:       0 1px 2px rgba(0, 0, 0, .40);
+  --btn-shadow-hi:    0 2px 4px rgba(0, 0, 0, .45);
+  --btn-shadow-press: inset 0 2px 4px rgba(0, 0, 0, .50);
+
+  /* 主 / 危险按钮：白顶光比 .btn 留得多一点（22%），否则按钮会显得
+     比旁边的普通按钮还平。 */
+  --lit-hi:           rgba(255, 255, 255, .22);
+  --lit-lo:           rgba(0, 0, 0, .18);
+  --lit-shadow:       0 1px 2px rgba(0, 0, 0, .40);
+  --lit-shadow-hi:    0 2px 4px rgba(0, 0, 0, .45);
+  --lit-shadow-press: inset 0 2px 4px rgba(0, 0, 0, .45);
+  --danger-hi:           rgba(255, 255, 255, .22);
+  --danger-lo:           rgba(0, 0, 0, .18);
+  --danger-shadow:       0 1px 2px rgba(0, 0, 0, .40);
+  --danger-shadow-press: inset 0 2px 4px rgba(0, 0, 0, .45);
+
+  /* 映射连线。端点圆点浅灰（压在暗树上才显），淡档跟着提亮。 */
+  --link-dim: #4c5563;
+  --link-dot: #c9d2e0;
+
+  /* 四枚状态药丸：浅底深字 → 深底浅字（底色用同色系的低透明度）。 */
+  --state-pending:      #e0a95f;
+  --state-pending-bg:   rgba(208, 138, 62, .16);
+  --state-pending-edge: #7a5a2e;
+  --state-ok:           #63c37d;
+  --state-ok-bg:        rgba(70, 196, 99, .14);
+  --state-ok-edge:      #2f5b3c;
+  --state-info:         #7aa9f0;
+  --state-info-bg:      rgba(91, 149, 255, .14);
+  --state-info-edge:    #33486e;
+  --state-same:         #98a2b0;
+  --state-same-bg:      rgba(140, 150, 165, .16);
+  --state-same-edge:    #4a525e;
+
+  --warn:      #d9a52c;   /* "有个待办/没匹配上"的语气。
+                             2026-10-23 起**不再与 --mod 同源** —— --mod 变成
+                             了更新的青蓝，而警告必须是琥珀，两者语义不同。 */
+  --warn-edge: #7a5a2e;
+  --warn-soft: rgba(208, 138, 62, .16);
+}
+
+/* ---------------------------------------------- 石墨下的语法高亮
+
+   与 oled 同一批选择器，换一套更柔的 One-Dark 经典取值
+   （#c678dd / #e06c75 / #56b6c2 / #98c379 / #7f8794 / #d19a66）——
+   石墨的画布比纯黑亮一档，太艳的字会发飘。 */
+:root[data-theme="graphite"] .lang-java .keyword   { color: #c678dd; }
+:root[data-theme="graphite"] .lang-java .paren     { color: #e06c75; }
+:root[data-theme="graphite"] .lang-java .bracket   { color: #56b6c2; }
+:root[data-theme="graphite"] .lang-java .brace     { color: #56b6c2; }
+:root[data-theme="graphite"] .lang-java .string    { color: #98c379; }
+:root[data-theme="graphite"] .lang-java .comment   { color: #7f8794; }
+:root[data-theme="graphite"] .lang-java .semicolon { color: #b0b8c4; }
+
+:root[data-theme="graphite"] .lang-javascript .keyword   { color: #c678dd; }
+:root[data-theme="graphite"] .lang-javascript .string    { color: #98c379; }
+:root[data-theme="graphite"] .lang-javascript .comment   { color: #7f8794; }
+:root[data-theme="graphite"] .lang-javascript .paren     { color: #e06c75; }
+:root[data-theme="graphite"] .lang-javascript .brace     { color: #56b6c2; }
+:root[data-theme="graphite"] .lang-javascript .bracket   { color: #56b6c2; }
+:root[data-theme="graphite"] .lang-javascript .semicolon { color: #b0b8c4; }
+
+:root[data-theme="graphite"] .lang-html .html-tag       { color: #e06c75; }
+:root[data-theme="graphite"] .lang-html .html-attribute { color: #d19a66; }
+:root[data-theme="graphite"] .lang-html .html-string    { color: #98c379; }
+:root[data-theme="graphite"] .lang-html .html-comment   { color: #7f8794; }
+:root[data-theme="graphite"] .lang-html .html-doctype   { color: #c678dd; }
+
+:root[data-theme="graphite"] .lang-css .keyword     { color: #c678dd; }
+:root[data-theme="graphite"] .lang-css .selector    { color: #e06c75; }
+:root[data-theme="graphite"] .lang-css .property    { color: #d19a66; }
+:root[data-theme="graphite"] .lang-css .value       { color: #98c379; }
+:root[data-theme="graphite"] .lang-css .punctuation,
+:root[data-theme="graphite"] .lang-css .terminator  { color: #b0b8c4; }
+:root[data-theme="graphite"] .lang-css .comment     { color: #7f8794; }
+
+:root[data-theme="graphite"] .lang-xml .xml-tag       { color: #e06c75; }
+:root[data-theme="graphite"] .lang-xml .xml-attribute { color: #d19a66; }
+:root[data-theme="graphite"] .lang-xml .xml-string    { color: #98c379; }
+:root[data-theme="graphite"] .lang-xml .xml-comment   { color: #7f8794; }
+
+/* sql-style.css 在原版里也是白底取值（#0000FF / #008000 / #FF4500），
+   与上边同一套映射。 */
+:root[data-theme="graphite"] .lang-sql .keyword { color: #c678dd; }
+:root[data-theme="graphite"] .lang-sql .string  { color: #98c379; }
+:root[data-theme="graphite"] .lang-sql .number  { color: #d19a66; }
+:root[data-theme="graphite"] .lang-sql .comment { color: #7f8794; }
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 var(--ui);
+  overflow: hidden;
+  user-select: none;
+}
+
+.grow { flex: 1; }
+
+/* ---------------------------------------------------------------- 工具栏 */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);   /* 让工具栏"浮"在树区之上，而不是和它贴平 */
+  flex: none;
+  /* 窗口是无边框的（gui/main.go 的 Frameless），原生标题栏没了 —— 工具栏顶上这条
+     就是新的标题栏：空白处按住能拖窗口、双击能最大化/还原。--wails-draggable 会被
+     子元素继承，所以交互控件要显式写回 no-drag（见下面 .btn / .win-ctl）。 */
+  --wails-draggable: drag;
+}
+/* 工具栏里的按钮 / 品牌都不能当拖动把手：否则"按住想点按钮"稍微一动就变成拖窗口。 */
+.toolbar .btn,
+.toolbar .brand,
+.toolbar .win-ctls { --wails-draggable: no-drag; }
+
+/* 窗口按钮（最小化 / 最大化 / 关闭）。样式学原生标题栏那套：静止态纯透明，
+   悬停铺一层灰，关闭键悬停变红。比 .btn 更方、更小、无边框。 */
+.win-ctls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+}
+.win-ctl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  font: inherit;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background-color .12s, color .12s;
+}
+.win-ctl:hover { background-color: var(--hover); color: var(--text); }
+.win-ctl:active { background-color: var(--active); }
+.win-ctl-close:hover { background-color: #e5484d; color: #fff; }
+.win-ctl-close:active { background-color: #cc3b40; color: #fff; }
+/* 最大化 / 还原两个图标二选一：默认显示"最大化"（方框），窗口已最大化时换成"还原"
+   （叠一个小方框）。切换由 app.js 的 syncWinMaxIcon 加 .is-max 驱动。 */
+.win-ico-restore { display: none; }
+.win-ctl.is-max .win-ico-max { display: none; }
+.win-ctl.is-max .win-ico-restore { display: block; }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: .2px;
+  color: var(--text);
+  padding-right: 12px;
+  margin-right: 6px;
+  border-right: 1px solid var(--border);
+}
+/* 品牌标 = 应用图标本身（绿色菱形 logo），给工具栏一个明确的"起点"。
+   纯文字的品牌名在一排按钮里看着像第 0 个按钮，加个标记才像一个应用。
+   源图是 gui/build/appicon.png（Wails 拿它当 exe / 任务栏图标），
+   brand.png 是它的裁边副本 —— **换图标时两处一起换**。
+   注意**不能**放进 icons/：那个目录是"原样搬运自原版 Java 资源"的专用目录，
+   gui/icon_test.go 有两条守门测试盯着（图标表一一对应 + 与原版逐字节一致），
+   而这是移植版新增的资产，原版没有。
+   （以前这里是个 --accent 蓝方块；2026-10-16 用户要求换成绿色应用图标。） */
+.brand::before {
+  content: '';
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: url('brand.png') center / contain no-repeat;
+}
+
+/* 按钮的"质感"靠三样东西叠出来，缺一样就会重新变平：
+     1) 一层**半透明**的垂直渐变（顶部白 → 底部透明）压在底色上 ——
+        用半透明而不是直接写死两段色值，是为了让 hover 只改 background-color
+        就能平滑过渡（渐变之间浏览器不做插值，直接换会是硬跳）；
+     2) 顶部 1px 内高光 + 底部 1px 内暗影，一上一下夹出"厚度"；
+     3) 外投影，让按钮离开底纸。
+   没有做强高光/强投影那种拟物效果，只是"有厚度的一小块"。 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--text);
+  background-color: var(--btn-face);
+  background-image: linear-gradient(180deg, var(--btn-gloss), rgba(255, 255, 255, 0));
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  box-shadow:
+    var(--btn-shadow),
+    inset 0 1px 0 var(--btn-hi),
+    inset 0 -1px 0 var(--btn-lo);
+  cursor: pointer;
+  transition: background-color .12s, border-color .12s, box-shadow .12s, color .12s;
+}
+.btn:hover:not(:disabled) {
+  background-color: var(--surface-2);
+  border-color: var(--btn-edge);
+  box-shadow:
+    var(--btn-shadow-hi),
+    inset 0 1px 0 var(--btn-hi),
+    inset 0 -1px 0 var(--btn-lo);
+}
+/* 按下：底色压到最深，投影换成**内凹** —— 视觉上"陷进去"，
+   比单纯换个底色更能说明"这一下按到了"。 */
+.btn:active:not(:disabled) {
+  background-color: var(--active);
+  border-color: var(--btn-edge);
+  box-shadow: var(--btn-shadow-press);
+}
+/* 保持按下的开关态按钮（toggle）。
+   只有「单包视图」一个用户，但规则通用：谁加 .active 谁就一直是"按着"的样子。
+   为什么必须有这条：app.js 早就在给它加 .active，可是**从来没有规则命中过这个
+   class** —— 于是单包视图下按钮和静止态长得一模一样，唯一的状态提示只剩布局变化
+   （用户 2026-10-22 报障"切换了但看不出来"）。文字色用 --accent-press 而不是
+   --accent：后者在亮色底上偏浅，而这里是"选中"语义，要比悬停更抓眼。
+   渐变高光保留（不像 :disabled 那样整个去掉），否则会从"陷进去"变成"贴平"。 */
+.btn.active:not(:disabled) {
+  background-color: var(--row-sel);
+  border-color: var(--accent-press);
+  color: var(--accent-press);
+  box-shadow: var(--btn-shadow-press);
+}
+.btn:disabled {
+  color: var(--text-mute);
+  background-color: var(--surface);
+  background-image: none;
+  border-color: var(--border);
+  box-shadow: none;
+  cursor: default;
+}
+/* .btn 有了 display 之后，UA 样式表里的 [hidden]{display:none} 就压不住了。
+   现在只有 contentwin-foot 里用到 hidden 按钮，但这条别删 —— 哪天别处再
+   加一个 hidden 的按钮，"该藏的露出来"这种错很难一眼看出来。 */
+.btn[hidden] { display: none; }
+
+/* 小一号的按钮：给面板头那种 11px 的行内位置用（临时补丁的「全部撤销」）。
+   .btn 的 5px/12px 内边距放在那种行里会把行撑高一倍。 */
+.btn-sm {
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 16px;
+  gap: 4px;
+}
+
+/* 主按钮用同一套"厚度"手法，只是把渐变换成提亮而不是压暗 ——
+   深色底上叠白色高光才看得出凸起。 */
+.btn-primary {
+  background-color: var(--accent);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .18), rgba(255, 255, 255, 0));
+  border-color: var(--accent-hi);
+  color: #fff;
+  box-shadow:
+    var(--lit-shadow),
+    inset 0 1px 0 var(--lit-hi),
+    inset 0 -1px 0 var(--lit-lo);
+}
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--accent-hi);
+  border-color: var(--accent-hi);
+  box-shadow:
+    var(--lit-shadow-hi),
+    inset 0 1px 0 var(--lit-hi),
+    inset 0 -1px 0 var(--lit-lo);
+}
+.btn-primary:active:not(:disabled) {
+  background-color: var(--accent-press);
+  border-color: var(--accent-press);
+  box-shadow: var(--lit-shadow-press);
+}
+.btn-primary:disabled {
+  background-color: var(--surface-2);
+  background-image: none;
+  border-color: var(--border);
+  color: var(--text-mute);
+  box-shadow: none;
+}
+
+/* 只有图标的按钮：静止态是"透明的一块"（工具栏里一排图标全带常驻边框会很吵），
+   悬停时边框才浮现 + 铺底色 —— 用"浮现"而不是常驻边框来提示可点。
+   边框宽度一直是 1px（只是颜色透明），所以浮现时不会把邻居挤动。 */
+.btn-icon {
+  padding: 4px 7px;
+  font-size: 13px;
+  line-height: 1;
+  background-color: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text-dim);
+}
+.btn-icon:hover:not(:disabled) {
+  background-color: var(--hover);
+  border-color: var(--border-hi);
+  color: var(--text);
+}
+.btn-icon:active:not(:disabled) {
+  background-color: var(--active);
+  border-color: var(--btn-edge);
+}
+
+/* 工具栏分组：竖线画在按钮**外面**（绝对定位在 gap 里），
+   不占按钮自身的背景 —— 否则悬停时那块底色会把竖线一起染上。
+   两处断点：动作组 | 视图组，以及左侧整体 | 右侧的全局动作。 */
+#btn-refresh, #btn-search { position: relative; }
+#btn-refresh::before, #btn-search::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--border-hi);
+}
+
+/* 工具栏里"只有图标"的按钮（搜索）。原版给 ImageView 定死 16x16。
+   搜索图标已改成内联 SVG（见 index.html，2026-10-16），所以 svg 也要一起定尺寸 ——
+   否则它按 viewBox 撑开，跟原来那张 16×16 的 PNG 不等高。 */
+.btn-icon img,
+.btn-icon svg { display: block; width: 16px; height: 16px; }
+
+/* ------------------------------------------------------------ 双树面板 */
+
+.panes {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  /* 匹配连线层是绝对定位的，要相对这里定位（见 .links）。 */
+  position: relative;
+}
+
+.pane {
+  /* flex-basis 用 0 而不是 50%：两个面板 + 分隔条是三个 flex 项，
+     50% + 50% 再加上分隔条必然溢出容器（分隔条 22px 时右边那侧会被挤掉）。
+     用 0 起步、按 grow 平分剩余空间，就与分隔条宽度无关了。 */
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+
+  /* Wails 的拖放落点标记。值必须是 --wails-drop-target 的约定值 "drop"，
+     否则 Wails 不把这块区域当成落点。
+     自定义属性会【继承】，所以 .pane 的子元素（.tree / .row …）也都带上它 ——
+     这是必需的：Wails 判定落点时取的是光标下最深那个元素的样式，
+     只有子元素也带上，落在树行上才算数。
+     因此下面那条高亮规则要写 `.pane.wails-drop-target-active`（Wails 会把
+     这个 class 加到落点及其带该属性的祖先上），不要写成裸的
+     `.wails-drop-target-active`，否则每一行都会亮。 */
+  --wails-drop-target: drop;
+
+  /* 快速搜索的浮层输入框要相对本面板定位（见 app.js 的 initFastSearch）。 */
+  position: relative;
+}
+/* 可拖动的分隔条 —— 对应原版 HomeView 里两个 SplitPane 的 divider：
+     .splitter-v：两棵树之间（topPane，水平）
+     .splitter-h：树区与「补丁信息」之间（centrePane，垂直）
+   替代原来的 .pane + .pane 边框 / .info-pane 的上边框：那两条边框现在
+   由分隔条自己画（::before），拖动时还能变色提示。 */
+.splitter { flex: none; background: var(--bg); position: relative; }
+/* 左右分隔条要当"连线走廊"用（见下面的 .links）：连线得有一条自己的通道，
+   压在树上会糊成一片。22px 大约能容纳 6 条线各占一道。 */
+.splitter-v { width: 22px; cursor: col-resize; }
+.splitter-h { height: 5px; cursor: row-resize; }
+.splitter::before {
+  content: '';
+  position: absolute;
+  background: var(--border);
+}
+/* 分隔线画在走廊正中 —— 走廊加宽后原来那个 left:2px 会贴到左边去。 */
+.splitter-v::before { left: 50%; top: 0; bottom: 0; width: 1px; margin-left: -0.5px; }
+.splitter-h::before { top: 2px; left: 0; right: 0; height: 1px; }
+.splitter:hover::before, .splitter.dragging::before { background: var(--accent); }
+
+/* ------------------------------------------------------------ 匹配连线
+
+   两棵树之间"补丁里的这个文件 ←→ 应用包里的那一行"的曲线。
+   配对由 Go 侧算好（State.mappedLinks，两端是 dom 路径），这里只负责画。
+
+   三件事决定了它长这样：
+     1. 端点接在**面板内边缘、行中心的高度**上。左树的行是 width:max-content，
+        MD5 列经常被面板裁掉，行内容右端根本不在可见区里。
+     2. 曲线用"两个控制点落在同一条道上"的贝塞尔：离开端点水平、中段贴着自己
+        的道竖着走、进入对端又水平 —— 就是桑基图那种连线。多条时按序号分道。
+     3. 对端滚出视口时把端点夹到可视边缘、再补一个小三角，否则线会突然断掉。 */
+.links {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  /* 线不能挡住树的点击 / 滚轮 / 拖放 */
+  pointer-events: none;
+  /* 压在两个面板之上，才能跨过中间那条分隔条 */
+  z-index: 6;
+}
+.links path { fill: none; stroke: var(--accent); stroke-linecap: round; }
+/* 非当前选中那一对：淡一档，但不能淡到看不见 */
+.links path.dim { stroke: var(--link-dim); opacity: .38; }
+/* 当前选中/悬停那一对 */
+.links path.focus { stroke-width: 2.2; opacity: 1; }
+.links circle { fill: var(--link-dot); stroke: var(--accent); stroke-width: 1.6; }
+.links circle.dim { stroke: var(--link-dim); opacity: .6; }
+.links circle.focus { stroke-width: 2; }
+/* 对端在视口外时的上/下小三角（实心，覆盖掉 path 的描边） */
+.links path.off { fill: var(--accent); stroke: none; opacity: .75; }
+
+/* 拖动中：别让鼠标划过文字时选中它们 */
+body.resizing { user-select: none; }
+
+/* 拖文件悬停时的落点提示 */
+.pane.wails-drop-target-active {
+  outline: 1px dashed var(--accent-hi);
+  outline-offset: -4px;
+  background: var(--accent-soft);
+}
+.pane.wails-drop-target-active .pane-head {
+  background: var(--surface-2);
+}
+
+/* 拖文件时"光标下最深的那一行"高亮（.drop-row 由 app.js 的 trackDropRow 挂）。
+   文件行亮 = 松手替换这个文件；目录行亮 = 松手把文件加进这个目录。
+   不用 .wails-drop-target-active 是因为 Wails 会把它加到落点**及所有祖先**
+   上，深层文件会让整列目录一起亮，看不出落点。 */
+.row.drop-row {
+  outline: 1px solid var(--accent-hi);
+  outline-offset: -1px;
+  background: var(--accent-soft);
+}
+/* 目录行再补一点底纹，和"替换文件"区分开：往目录里是**新增**，不是覆盖。 */
+.row.drop-row.expandable {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent-hi);
+}
+
+/* 「拖入待替换」块（常驻在「补丁信息」面板顶部，没有待替换时整块隐藏）。
+   场景：手里有一个 Foo.class 但忘了它在 jar 的哪个目录，拖到右侧让工具按
+   文件名反查，命中结果列在这里。
+
+   **为什么放在面板里而不是弹窗**：弹窗里点一行就替换，等于没看就动手；
+   放到面板之后是两步 —— 点一行先在应用树里定位并选中（可以展开、看内容、
+   看路径），确认没错再点「替换到选中项」。替换永远发生在看过之后。 */
+.pending {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  /* 清单最多占到面板底部留两行正文的位置 —— 候选多的时候让清单自己滚，
+     而不是把「补丁信息」正文挤成一条缝（那里面可能是"两边同一个文件"
+     这类警告，压没了就等于没提示）。 */
+  max-height: calc(100% - 80px);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+/* 上面给了 display:flex，UA 样式表的 [hidden]{display:none} 就压不住了 ——
+   没有待替换时这块会**一直挂在面板顶部**（空白的标题行 + 输入框）。
+   凡是自己设了 display 的块都必须补这一条。 */
+.pending[hidden] { display: none; }
+.pending-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  font-size: 12px;
+  flex: none;
+  /* 浅蓝底 + 下边框：把"这一块需要你处理"和下面的正文分开。
+     之前和正文同底色，整块糊在一起（用户反馈"下方信息不太明显"）。 */
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+}
+.pending-title { font-weight: 700; font-size: 13px; color: var(--text); }
+.pending-hint {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  background: var(--bg);      /* 与「补丁信息」正文同底色：这块是内容区 */
+  border-top: 1px solid var(--border);
+}
+/* 一个候选都没有时（最常见就是"包里没有这个文件"），清单是空的 ——
+   但它仍会留下一个 flex 项 + 上边框那条细线，把"按路径定位"那一行往下顶开
+   一点，看着就偏下（用户反馈"定位一栏靠下"）。空的直接不渲染，
+   让这一行贴回标题栏下面。 */
+.pending-list:empty { display: none; }
+/* 多文件拖入时的"来源文件"分组标题。
+   为什么需要它：一次拖 3 个文件，候选清单里会出现 3 组路径，没有这行标题
+   就分不清"这一行该用哪个文件的内容替换" —— 而选错就是把 A 的内容写进 B。
+   不做成可点行：它不代表任何目标，点了没有语义。 */
+.pending-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px 5px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.pending-group-name {
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* 命中数做成小药丸：它是这一组里最该被一眼看到的信息。 */
+.pending-group-note {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-dim);
+}
+.pending-group.is-miss .pending-group-note {
+  color: var(--warn);
+  border-color: var(--warn-edge);
+  background: var(--warn-soft);
+}
+.pending-group-size {
+  margin-left: auto;
+  color: var(--text-dim);
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+/* 每条是一整行按钮：路径在左、大小在右。 */
+.pending-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.pending-list li:last-child .pending-item { border-bottom: 0; }
+.pending-item:hover,
+.pending-item:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+/* 选中（= 已经定位到应用树里的那一项）。左侧竖条和树上 .row.located
+   是同一套视觉语言，一眼能对上"面板这行 ↔ 树上那行"。 */
+.pending-item.active {
+  background: var(--row-sel);
+  box-shadow: inset 3px 0 0 var(--accent-hi);
+}
+.pending-item.active .pending-path { color: var(--accent-hi); font-weight: 600; }
+/* 占位节点（包里没有、补丁按 README 新建的位置）：不能用主色，免得看起来
+   像"可以替换的候选"。点它只定位。 */
+.pending-item.is-placeholder { cursor: default; }
+.pending-item.is-placeholder:hover { background: transparent; }
+.pending-item.is-placeholder .pending-path { color: var(--text-dim); }
+.pending-tag {
+  flex: none;
+  margin-top: 1px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--text-mute, var(--text-dim));
+  white-space: nowrap;
+}
+/* 「内容相同」：与「补丁新增」同一形状、不同色 —— 一个是"这是新加的"，
+   一个是"换了也没变化"，语气完全不同，不能长得一样。 */
+.pending-tag.is-same {
+  color: var(--state-same);
+  background: var(--state-same-bg);
+  border-color: var(--state-same-edge);
+}
+/* 一行两段：主行是条目路径（真正区分它们的往往不是这行），副行是
+   「在 xxx.jar 里」—— 嵌套 jar 里同名文件靠 jar 路径区分，不能截掉。 */
+.pending-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pending-path {
+  font-family: var(--mono, Consolas, monospace);
+  font-size: 12.5px;
+  line-height: 1.6;
+  /* 路径要能看全：允许换行，别用省略号把关键的后半段吃掉 */
+  word-break: break-all;
+  color: var(--text);
+}
+.pending-jar {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pending-size {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 按路径匹配那一行：粘包内路径 → 定位。放在清单下方，不抢候选的位置。
+   ⚠️ 类名是 pathrow：`.pending-path` 是"候选的路径文字"，重名会把候选那行
+   套上这里的 padding / 白底（踩过一次，整块清单看起来灰蒙蒙的）。 */
+.pending-pathrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 上下 6px → 5px：定位行紧贴标题栏时略高一点点（用户嫌它靠下）。
+     只收 1px，不动输入框高度，够"上调一点"又不至于挤。 */
+  padding: 5px 12px;
+  flex: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.pending-pathrow input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: 12px/1.4 var(--mono, Consolas, monospace);
+}
+.pending-pathrow input:focus {
+  outline: none;
+  border-color: var(--accent-hi);
+}
+.pending-pathrow input::placeholder { color: var(--text-mute, var(--text-dim)); }
+
+/* 按路径定位的解释行：粘进来的是目录 / 占位节点时，在这里把"为什么不能替换、
+   下一步怎么做"写清楚。放在输入框正下方 —— 用户的视线就在这儿。 */
+.pending-note {
+  flex: none;
+  padding: 0 12px 8px;
+  background: var(--surface);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.pending-note.is-warn { color: var(--warn); }
+.pending-note b { font-weight: 600; }
+.pending-note code {
+  font: 11.5px/1.6 var(--mono, Consolas, monospace);
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* 「拖入的文件」条：补丁面板顶部，逐条列出刚拖进来的文件。
+   空着时整块隐藏（见 index.html 的 hidden）。
+   为什么逐个列出来而不是"xxx 等 2 个"：用户拖的就是"这几个文件"，
+   名字是唯一能确认"我拖对了没"的信息 —— 折叠成一个数字等于没说。 */
+.dropfile {
+  flex: none;
+  padding: 7px 12px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+}
+.dropfile-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+.dropfile-title { color: var(--text-dim); flex: none; }
+.dropfile-count {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.dropfile-list {
+  list-style: none;
+  margin: 3px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/* 一行一个文件：名字（粗）+ 体积 + 所在目录（淡、可省略，完整路径在 title 上）。
+   目录放右边、允许被吃掉前半段也无所谓 —— 真正用来认文件的是名字。 */
+.dropfile-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  /* 这条记录可以直接拖到左侧应用树上（见 app.js 的 initListDrag），
+     光标要给出"能拖"的信号，否则用户只会当成只读的一行文字。 */
+  cursor: grab;
+}
+.dropfile-item:active { cursor: grabbing; }
+.dropfile-name {
+  font-weight: 600;
+  color: var(--text);
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dropfile-size {
+  color: var(--text-dim);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+/* MD5：和左边树行那一列同一身打扮（等宽 + 静一档的颜色），
+   32 位十六进制在 12px 下占得下，但窄面板里仍可能被挤 ——
+   所以给 min-width:0 + 省略号 + title 兜底，绝不给这一列撑破整行。 */
+.dropfile-md5 {
+  font: 11px/1.6 var(--mono, Consolas, monospace);
+  color: var(--text-mute, var(--text-dim));
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+  cursor: text;
+}
+.dropfile-path {
+  margin-left: auto;
+  font: 11px/1.6 var(--mono, Consolas, monospace);
+  color: var(--text-mute, var(--text-dim));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.dropfile-more {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding-top: 2px;
+}
+/* 状态药丸：这条拖入文件到底"生效没"。它是对抗误会的最后一道保险 ——
+   粘了个目录路径却以为文件躺在那儿、会跟着打补丁出去，这种错觉就是靠
+   "未定位"这个橙色药丸戳破的。四种状态四色，一眼能分。 */
+.dropfile-state {
+  flex: none;
+  margin-left: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+/* 未定位：拖进来了、但还没绑定到包里的任何节点（比如粘的是目录路径，
+   只能定位、不能替换）。这种最危险 —— 用户最容易以为它已经生效了。
+   用橙色 + 细边把它顶出来。 */
+.dropfile-state-pending {
+  color: var(--state-pending);
+  background: var(--state-pending-bg);
+  border-color: var(--state-pending-edge);
+}
+/* 已替换 / 已加入：确确实实写进包里了，绿色/蓝色收尾。 */
+.dropfile-state-replaced {
+  color: var(--state-ok);
+  background: var(--state-ok-bg);
+  border-color: var(--state-ok-edge);
+}
+.dropfile-state-added {
+  color: var(--state-info);
+  background: var(--state-info-bg);
+  border-color: var(--state-info-edge);
+}
+/* 内容相同：什么都没做。刻意用中性灰而不是绿色 —— 绿色是"改成了"，
+   这里恰恰是"不用改"，用绿色会让人以为替换发生了。 */
+.dropfile-state-same {
+  color: var(--state-same);
+  background: var(--state-same-bg);
+  border-color: var(--state-same-edge);
+}
+
+
+/* 「补丁信息」标题右侧的角标：有待替换结果时亮起来。
+   清单在面板下部、位置靠下，没有这个提示很容易"拖完不知道下头有东西"。 */
+.pane-badge {
+  margin-left: 8px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+  font-variant-numeric: tabular-nums;
+}
+.pane-badge[hidden] { display: none; }
+/* 一个都没匹配到时角标转成橙色：不是"有活要干"，而是"这次没找到"。 */
+.pane-badge.is-miss {
+  background: rgba(208, 138, 62, .16);
+  border: 1px solid var(--warn-edge);
+  color: var(--warn);
+}
+
+/* 单包视图：隐藏补丁面板 / 左右分隔条 / 补丁信息栏 / 上下分隔条，
+   只留应用包这一侧占满整窗 —— 给"单文件替换"一个更宽的落区。
+   切换只是给 body 加 .single-app，布局知识全在这几条规则里。
+
+   例外：**有待替换结果时「补丁信息」要露出来**（body.has-pending）。
+   单包视图正是"拖单文件进来替换"的主场，而待替换清单就住在那个面板里，
+   一起藏掉的话拖完就什么都看不见了。 */
+body.single-app #pane-patch,
+body.single-app #split-v,
+body.single-app #split-h,
+body.single-app .info-pane {
+  display: none;
+}
+body.single-app.has-pending .info-pane {
+  display: flex;
+}
+body.single-app #pane-app {
+  flex: 1 1 100%;
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  min-width: 0;
+}
+
+.pane-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  flex: none;
+}
+/* 标题前的小色条：每块面板有个明确起点，一眼能看出"这块从哪开始" */
+.pane-title::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* 路径做成小药丸：它是一段"元信息"，不该和标题抢同一层视觉。
+   保留 direction: rtl —— 路径过长时优先保留尾部（文件名）。 */
+.pane-path {
+  font: 11px/1.5 var(--mono);
+  color: var(--text-mute);
+  padding: 2px 9px;
+  background: var(--surface-2);
+  border-radius: 999px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;      /* 路径过长时优先保留尾部（文件名） */
+  text-align: left;
+}
+
+.tree {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 0 14px;
+}
+/* ---------------------------------------------------------------- 临时补丁
+   Go 版新增的区块，原版没有对应物。挂在补丁面板顶部、树的上方，
+   用来汇总"这次要删掉哪些文件"（用户在应用树上右键 → 标记删除）。
+
+   设计上刻意做成**有上限的滚动列表**而不是摊开：删几十个文件时它会把
+   树挤没了。上限用 max-height 卡住，里面自己滚。 */
+.temppatch {
+  flex: none;
+  max-height: 30%;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  background: var(--danger-bg);
+}
+.temppatch[hidden] { display: none; }
+.temppatch-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px 4px;
+  flex: none;
+}
+.temppatch-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+}
+.temppatch-title b { font-weight: 700; }
+/* 「全部撤销」：靠右，且按中心对齐 —— 面板头是 baseline 对齐，
+   按钮用 baseline 会浮起来半行。 */
+.temppatch-head .btn-sm {
+  margin-left: auto;
+  align-self: center;
+}
+.temppatch-hint {
+  font-size: 11px;
+  color: var(--text-mute);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.temppatch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 6px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.temppatch-list li {
+  font: 11px/1.5 var(--mono);
+  color: var(--text);
+  /* 完整路径可能很长（Spring Boot 包里 BOOT-INF/classes/... 一撸到底），
+     允许换行而不是省略号 —— 省略号会把辨识信息全吃掉，换行至少看得全。
+     面板本身限高了，多两行不会把树挤没。 */
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.temppatch-list li:hover { background: var(--danger-bg); }
+/* 每行一个删除线样式的小药丸 —— 与树里的 .t-del 视觉同源 */
+.temppatch-list li .tp-name { color: var(--danger-line); text-decoration: line-through; }
+.temppatch-list li .tp-size { color: var(--text-mute); margin-left: 6px; }
+.temppatch-empty {
+  padding: 4px 4px 6px;
+  font-size: 11px;
+  color: var(--text-mute);
+}
+/* 树要能接收键盘焦点（"在树上打字即搜"），但鼠标点一下不该冒出焦点框 ——
+   搜索激活时那个浮层输入框本身就是焦点提示。键盘 Tab 过来仍给个可见轮廓。 */
+.tree:focus { outline: none; }
+.tree:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+
+/* 树上打字即搜的浮层输入框（对应原版 FastSearchControl 的
+   TextDynamicWidthField）。浮在树的左上角、**不随树滚动**，宽度随内容变化。
+
+   它挂在 .pane 上而不是 .tree 里，就是为了不跟着滚动 —— .tree 是滚动容器，
+   放在里面的绝对定位元素会被一起滚走。 */
+.fastsearch {
+  position: absolute;
+  z-index: 6;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+.fastsearch[hidden] { display: none; }
+
+/* 量文本宽度用的离屏尺子。原版用 JavaFX 的 Text.layoutBounds，
+   浏览器里没有等价物，就用一个同字体的隐藏 span 量。 */
+.fastsearch-measure {
+  position: absolute;
+  left: -9999px;
+  top: -9999px;
+  visibility: hidden;
+  white-space: pre;
+  font: inherit;
+  font-size: 12px;
+}
+
+.tree::-webkit-scrollbar { width: 10px; height: 10px; }
+.tree::-webkit-scrollbar-track { background: transparent; }
+/* 滑块用 background-clip + 透明边框做成"浮起来"的一条，
+   比整块贴边更像现代桌面应用。 */
+.tree::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 6px;
+}
+.tree::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hi); background-clip: padding-box; }
+.tree::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---------------------------------------------------------------- 树节点 */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding-right: 12px;
+  white-space: nowrap;
+  cursor: default;
+  /* 行按**内容的自然宽度**排布，不压缩：装不下时由 .tree 出横向滚动条，
+     用户左右滑动就能看到完整信息。这是原版 TreeView 的行为 ——
+     cell 宽度 = 内容宽度（图标 + 文件名 + 时间/大小/MD5），超出即滚动。
+     min-width:100% 保证内容比容器窄时行仍撑满，悬停/选中底色才铺得满。 */
+  width: max-content;
+  min-width: 100%;
+}
+.row:hover { background: var(--hover); }
+.row.selected { background: var(--row-sel); }
+/* 补丁树的行可以拖到应用树（见 app.js 的 makeRow / initTreeDrag）。
+   光标**默认保持普通箭头**：整行常驻 grab 会让"能拖"变成常态噪音，也和
+   普通行的点击手感不一致（用户 2026-10-28："正常情况下鼠标样式还是正常的，
+   长按之后变成小手"）。只有长按够时长（.drag-ready）才变张开的小手 ——
+   这是"现在可以拖了"的唯一信号，配合悬停提示里的那句话。
+   注意**不要**用 :active 来变抓手：一按下去就变，会和"长按够时长才真的
+   能拖"这个门槛打架（用户会以为已经可以拖了，一甩却被取消）。
+   拖拽真正开始之后 cursor 由浏览器接管，这里管不到也不用管。 */
+.row.drag-ready { cursor: grab; }
+
+.twisty {
+  width: 14px;
+  flex: none;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-mute);
+  cursor: pointer;
+}
+.twisty:hover { color: var(--text); }
+.twisty.leaf { cursor: default; }
+
+/* 文件类型图标：原版 FileTreeCell.addIcon 是 16×16 的 ImageView，图来自
+   TreeNodeUtil.getIconImage（判定在 Go 侧，见 gui/icon.go）。
+
+   源图是原版那套 64×64 PNG，交给浏览器平滑缩放 —— 跟 JavaFX 一样是平滑的，
+   别加 image-rendering: pixelated。 */
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  user-select: none;
+}
+
+/* 文件名这一格 = 名字 + 跟在后面的两个小标记（星号 / README 标签，
+   由 app.js 的 makeRow 挂进来）。做成 flex 是为了让标记能贴着名字排。
+   flex:none —— 按内容宽度排布、不参与压缩（整行的滚动策略见 .row）。 */
+.name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+/* 纯文件名。单独一层是为了让「已修改」星号 / README 标签能作为兄弟项
+   排在它后面（见 app.js 的 makeRow）。
+   这里**不做省略号** —— 装不下时由 .tree 横向滚动（对齐原版），
+   而不是把名字截断。 */
+.name-text {
+  white-space: nowrap;
+  flex: none;
+}
+
+.modTime, .size, .md5 {
+  padding-left: 12px;
+  font: 11px var(--mono);
+  color: var(--text-mute);
+  flex: none;
+}
+.modTime { margin-left: auto; }
+
+/* 变更状态着色：名称 + 左侧色条 */
+.row.t-add  .name { color: var(--add); }
+.row.t-mod  .name { color: var(--mod); }
+.row.t-del  .name, .row.t-del  .name-text { color: var(--del); }
+.row.t-manualDel .name, .row.t-manualDel .name-text { color: var(--del); }
+/* 删除线必须落在 .name-text 上：.name 是 flex 容器（见上面的 .name 注释），
+   而它的 text-decoration **不会**传播进 flex 子项 —— 实测子项拿到的是
+   none。只写在 .name 上的话，"已删除"的文件看着跟普通文件一样。 */
+.row.t-del  .name-text,
+.row.t-manualDel .name-text { text-decoration: line-through; text-decoration-color: var(--del-line); }
+
+/* README 节点：它是"这轮补丁的说明书"，得一眼能从一堆文件里认出来。
+   光换个文字颜色太不显眼（尤其在深色文件名中间），所以叠了三层：
+   底色 + 左侧色条 + 名字后面的小标签。 */
+.row.t-readme { background: var(--readme-soft); box-shadow: inset 2px 0 0 var(--readme); }
+.row.t-readme .name { color: var(--readme); font-weight: 600; }
+.row.t-readme .tag {
+  flex: none;
+  padding: 1px 6px;
+  font: 10px/14px var(--mono);
+  letter-spacing: .5px;
+  color: var(--readme);
+  background: var(--surface);
+  border: 1px solid var(--readme);
+  border-radius: var(--r-sm);
+}
+
+/* 自定义根节点：它是"这一轮的补丁根"，不是普通目录，得能一眼看出来 */
+.row.t-customRoot .name { color: var(--accent-hi); font-weight: 600; }
+.row.t-customRoot { box-shadow: inset 2px 0 0 var(--accent-hi); }
+
+.row.t-add, .row.t-mod, .row.t-del, .row.t-manualDel { box-shadow: inset 2px 0 0 currentColor; }
+.row.t-add  { color: var(--add); }
+.row.t-mod  { color: var(--mod); }
+.row.t-del  { color: var(--del); }
+.row.t-manualDel { color: var(--del); }
+.row.t-root .name, .row.t-customRoot .name { font-weight: 600; }
+
+/* 定位高亮：在补丁树点一个有对应项的文件，应用树里被定位到的那一行闪一下。
+
+   放在 t-* 那组之后是有意的 —— 同为 0,2,0 的选择器，靠源码顺序覆盖，
+   否则 t-readme / t-customRoot 自带的背景和色条会把它盖掉。
+
+   不用 box-shadow 画左侧色条：t-add/t-mod/t-del 已经占用了 box-shadow
+   （inset 2px 0 0 currentColor），叠上去会互相覆盖。改用 outline。
+
+   短暂高亮、不做持久选中：树会因为重新匹配整个换掉，持久高亮可能指到
+   另一个节点上去。见 app.js 的 flashRow。 */
+.row.located {
+  background: var(--row-sel);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.empty {
+  padding: 14px 12px;
+  color: var(--text-mute);
+  font-size: 12px;
+}
+
+/* 空状态里的"可拖入"提示 */
+.empty-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-mute);
+  opacity: .75;
+}
+
+/* ------------------------------------------------------------ 补丁信息面板 */
+
+/* 对应原版首页底部的「补丁信息」TitledPane。原版是 setCollapsible(false)，
+   所以这里也常驻显示，不做折叠 —— 空着的时候就是一块空白，不闪不跳。 */
+.info-pane {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  height: 150px;      /* 拖动 .splitter-h 时由 app.js 改这个值 */
+  background: var(--surface);
+}
+
+/* 有候选时把面板抬高一些：默认 150px 连三条候选都放不下。
+   300px 大约 = 三条候选 + 几行「补丁信息」正文。
+   只在**真的有候选**时抬（body.pending-tall）—— 一个"没匹配到"的提示
+   只占一行，把面板撑到 300px 纯属浪费树的地方。
+   min-height 盖得住内联 height，关掉清单后自动失效，不用还原用户拖过的高度。
+   340px 是"3 条候选 + 按路径那一行"刚好不截断的高度：清单里最后一行被切掉
+   一半最难受 —— 用户会以为就这些了，其实还能滚。 */
+body.pending-tall .info-pane { min-height: 340px; }
+
+/* 按路径定位失败/只定位到目录时，输入框下面那行解释也要能看见 ——
+   默认 150px 的面板会把解释行直接切掉，用户只看到输入框，
+   等于"什么都没告诉我"。 */
+body.has-pathnote .info-pane { min-height: 340px; }
+
+.info-pane .pane-head { border-bottom: 1px solid var(--border); }
+
+.info-body {
+  flex: 1;
+  margin: 0;
+  padding: 10px 14px;
+  overflow: auto;
+  background: var(--bg);      /* 与树区同底色：这块是"内容区"，面板头才是 --surface */
+  font: 12px/1.7 var(--mono);
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;   /* 正文要能选中复制，而 body 上是禁选的 */
+}
+
+.info-body::-webkit-scrollbar { width: 10px; height: 10px; }
+.info-body::-webkit-scrollbar-track { background: transparent; }
+.info-body::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 6px;
+}
+.info-body::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hi); background-clip: padding-box; }
+
+/* -------------------------------------------------------------- 状态栏 */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: var(--bar-shadow);
+  font-size: 12px;
+  flex: none;
+  min-height: 34px;
+}
+
+.stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.stat b { font: 600 12px var(--mono); }
+
+/* 增 / 改 / 删 做成小药丸 —— 这一屏最该一眼看到的就是这三个数。
+   底色沿用差异行那套浅色（--add-bg / --mod-bg / --del-bg），
+   与双栏里的行底色是同一套语义色，看久了能形成条件反射。
+   药丸文字用中性色、只把**数字**染成状态色，免得三块彩色太吵。 */
+.stat-add, .stat-mod, .stat-del {
+  padding: 1px 9px;
+  border-radius: 999px;
+  color: var(--text-dim);
+}
+.stat-add { background: var(--add-bg); }
+.stat-mod { background: var(--mod-bg); }
+.stat-del { background: var(--del-bg); }
+.stat-add b { color: var(--add); }
+.stat-mod b { color: var(--mod); }
+.stat-del b { color: var(--del); }
+
+.stat-msg { color: var(--text-mute); font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; }
+.sep { width: 1px; height: 16px; background: var(--border); flex: none; }
+
+/* ---------------------------------------------------------------- 弹窗 */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.overlay[hidden] { display: none; }
+
+.dialog {
+  width: 480px;
+  max-width: calc(100vw - 40px);
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;   /* 让圆角把里面的 .dialog-head 底色也一起裁掉 */
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dialog-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+/* 设置弹窗的分组。对应原版 ConfigView 里那几个 `collapsible=false` 的
+   TitledPane —— 原版有边框和标题栏，这里用"标题 + 3px 主色条"的写法，
+   跟 .pane-title 保持同一套视觉语言（整个界面只有这一种"区块起点"的表示）。 */
+.set-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* 组之间拉一条分隔线，不然两组标题会挤在一起分不清边界 */
+.set-group + .set-group {
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.set-group-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.set-group-title::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.field input[type="text"],
+.field input[type="number"],
+.field select {
+  padding: 6px 9px;
+  font: 12px var(--mono);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  user-select: text;
+}
+.field input[type="text"]:focus,
+.field input[type="number"]:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* 主题下拉：跟着输入控件走同一套底色/描边，只把字号换回界面字体
+   （选项是中文短语，等宽字体放着发挤）。appearance 保留原生箭头 ——
+   它是一个真的下拉，不该装成输入框。 */
+.field select {
+  font: 12px var(--ui);
+  cursor: pointer;
+}
+/* 原版 IntegerField 就是个加了正则过滤的 TextField（NumberField 继承
+   TextField，没有 Spinner），没有上下箭头。所以把 Chrome 的 spinner 也去掉，
+   免得跟原版长得不一样。 */
+.field input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.field input[type="number"]::-webkit-outer-spin-button,
+.field input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.field em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-mute);
+}
+
+.field-check {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+  color: var(--text);
+}
+.field-check input { margin: 0; accent-color: var(--accent); }
+.field-check em { flex-basis: 100%; padding-left: 20px; }
+
+.dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+.dialog-foot .hint {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-mute);
+}
+
+/* ------------------------------------------------------------ 全局搜索
+
+   对应原版 view/search/SearchView：一个输入框 + 一个结果列表，输入即搜，
+   空关键词时列表里是搜索历史。
+   尺寸固定（原版 720x300 且可缩放、尺寸落盘 application.xml；Go 版 GUI
+   没有配置文件，与其它对话框一样用固定尺寸 —— 见 MIGRATION.md）。 */
+.dialog-search {
+  width: 660px;
+  height: 430px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog-body-search {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  max-height: none;
+  overflow: hidden;
+}
+
+/* 搜索框：原版 TextField 是列表上方独立一格，这里贴着列表、只留一条下边框 */
+.search-input {
+  flex: none;
+  padding: 9px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  outline: none;
+}
+.search-input:focus { border-bottom-color: var(--accent); }
+.search-input::placeholder { color: var(--text-mute); }
+
+.search-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+.search-list::-webkit-scrollbar { width: 10px; height: 10px; }
+.search-list::-webkit-scrollbar-track { background: transparent; }
+.search-list::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 6px;
+}
+.search-list::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hi); background-clip: padding-box; }
+
+/* 一行结果：名称、路径、撑开的空隙、图标（原版 SearchListCell 的 HBox
+   就是"名字 → 路径 → Region 撑开 → 图标"这个顺序，spacing 10）。 */
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  font-size: 13px;
+  cursor: default;
+  user-select: none;
+}
+/* 兜底深度搜的中间提示/终态提示（"正在搜索嵌套包…" / "没有找到…"）。
+   不带 .search-row，走查数结果条数时不会把它算成一条结果。 */
+.search-msg {
+  padding: 18px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+  user-select: none;
+}
+.search-row:hover { background: var(--hover); }
+.search-row.selected { background: var(--row-sel); }
+.search-row .s-name { flex: none; color: var(--text); }
+.search-row .s-path {
+  flex: none;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.search-row .grow { flex: 1; min-width: 0; }
+.search-row .s-time { flex: none; font-size: 12px; color: var(--text-dim); }
+.search-row .s-icon { flex: none; width: 16px; height: 16px; }
+
+/* ---------------------------------------------------------------- 包对比
+
+   「对比」弹窗（见 index.html 的 #compare-overlay）：两个文件槽 + 汇总
+   药膏 + 分组明细。三个分组（内容不同 / 仅 A 有 / 仅 B 有）共用同一种
+   行型 —— 路径一行、A/B 两侧一行，缺失的那侧显示 "—"。分组只换标题
+   与语义色；色值直接借状态栏那套 --add/--mod/--del（被走查按 RGB
+   钉着的语义色，不另造新色）。 */
+.dialog-compare {
+  width: 780px;
+  height: 540px;
+  min-width: 520px;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  /* 原生缩放手柄（需要 overflow != visible，.dialog 已有 overflow: hidden）——
+     明细可能很长，固定尺寸不够用。与内容预览面板同一套做法（见 .contentwin）。
+     最大化态要收掉它，见下面的 .dialog-compare.maxed。 */
+  resize: both;
+}
+
+/* 最大化：铺满视口留一圈边距。这里用 CSS 而不是内联尺寸 ——
+   内联样式优先级高于样式表，用户拖过尺寸后内联值会顶住；
+   所以最大化时清掉内联宽高、挂 .maxed，还原时再把内联值写回去。
+   max-width 也要放开，否则 .dialog 那条 calc(100vw - 40px) 会把它压回去。 */
+.dialog-compare.maxed {
+  width: calc(100vw - 48px);
+  height: calc(100vh - 48px);
+  max-width: none;
+  resize: none;
+}
+
+/* 标题栏可拖动（按住移动弹窗）—— 与内容预览面板同一套手感：
+   光标变 move、拖的时候不会顺手选中标题文字。按钮仍是"点"的光标。 */
+.dialog-compare .dialog-head {
+  cursor: move;
+  user-select: none;
+}
+.dialog-compare .dialog-head .btn { cursor: pointer; }
+/* 最大化后不再是"可拖动的浮窗"：标题栏换成普通光标（与系统窗口一致）。 */
+.dialog-compare.maxed .dialog-head { cursor: default; }
+
+.dialog-body-compare {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  /* .dialog-body 默认有 max-height: 60vh —— 那是给"内容有限的小弹窗"用的。
+     这里必须放开：明细会长、而且弹窗本身可放大，卡住正文区会让放大的
+     下半截留空（同 .dialog-body-search 的处理）。 */
+  max-height: none;
+}
+
+/* 文件槽：标签 + 只读路径 + 浏览按钮。
+   两个槽同时是**拖放落点**（值必须是 Wails 约定的 "drop"，见 .pane 那段说明）——
+   自定义属性会继承，所以槽里的输入框、按钮也带上它，落在它们上面才算数。
+   Wails 判定落点时取光标下最深那个元素的样式，因此高亮规则写
+   `.cmp-slot.wails-drop-target-active`（Wails 会把 class 加到落点及其带该属性
+   的祖先上），而不是裸的 .wails-drop-target-active。 */
+.cmp-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--r-sm);
+  --wails-drop-target: drop;
+}
+.cmp-slot.wails-drop-target-active {
+  outline: 1px dashed var(--accent-hi);
+  outline-offset: -1px;
+  background: var(--accent-soft);
+}
+.cmp-slot-tag {
+  flex: none;
+  width: 40px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.cmp-path {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font: 12px var(--mono);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+.cmp-path::placeholder { color: var(--text-mute); }
+
+.cmp-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 汇总药膏：内容不同 / 仅 A 有 / 仅 B 有 / 相同 */
+.cmp-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cmp-pill {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+.cmp-pill-mod { background: var(--mod-bg); color: var(--mod); }
+.cmp-pill-del { background: var(--del-bg); color: var(--del); }
+.cmp-pill-add { background: var(--add-bg); color: var(--add); }
+
+.cmp-names {
+  font-size: 12px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+/* "单击某一行可查看内容"的提示。行可点这件事得写出来 —— 不写用户不会去点。 */
+.cmp-hint {
+  font-size: 12px;
+  color: var(--text-mute);
+}
+
+/* "已隐藏 N 个签名条目"的小提示。藏了东西得让用户知道去哪儿找 —— 一行小字、
+   与 hint 同档但带一层底色，不抢主表风头。 */
+.cmp-filtered-note {
+  font-size: 12px;
+  color: var(--text-mute);
+  padding: 4px 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
+.cmp-empty {
+  padding: 20px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* 文件对比结果里的「查看差异」按钮行（两个普通文件，比包对比简单） */
+.cmp-file-diff-row { padding: 4px 0 8px; }
+
+/* 嵌套展开的面包屑：展开 lib 下的嵌套 jar 后出现，带「← 返回」与当前路径 */
+.cmp-crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--text-mute);
+}
+.cmp-crumb-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 分组之间用一条淡线分开；标题用该组的语义色 */
+.cmp-group { border-top: 1px solid var(--border); }
+.cmp-group-title {
+  padding: 9px 0 3px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.cmp-group-mod .cmp-group-title { color: var(--mod); }
+.cmp-group-del .cmp-group-title { color: var(--del); }
+.cmp-group-add .cmp-group-title { color: var(--add); }
+
+.cmp-row {
+  padding: 5px 0 5px 8px;
+  border-left: 2px solid transparent;
+}
+.cmp-group-mod .cmp-row { border-left-color: var(--mod-bg); }
+.cmp-group-del .cmp-row { border-left-color: var(--del-bg); }
+.cmp-group-add .cmp-row { border-left-color: var(--add-bg); }
+
+/* 整行可点：点开用内容预览浮窗看这个文件在两侧的内容。
+   悬停给一层底色，配合标题栏的 title 提示"这是能点的"。 */
+.cmp-row-click { cursor: pointer; }
+.cmp-row-click:hover { background: var(--hover); }
+
+.cmp-row-path {
+  font: 12px var(--mono);
+  color: var(--text);
+  word-break: break-all;
+}
+
+/* A / B 两侧：大小加粗、md5 弱化。flex-wrap 是因为窄面板里两侧会折行 */
+.cmp-row-sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 18px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.cmp-side b {
+  margin-left: 5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cmp-side i {
+  margin-left: 8px;
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-mute);
+}
+.cmp-side-none { color: var(--text-mute); }
+
+/* ---------------------------------------------------------------- 提示 */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 48px;
+  transform: translateX(-50%);
+  max-width: 70vw;
+  padding: 9px 15px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  z-index: 60;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.toast[hidden] { display: none; }
+.toast.err { border-color: var(--err-border); color: var(--err-text); }
+
+/* -------------------------------------------------------------- 右键菜单 */
+
+.ctxmenu {
+  position: fixed;
+  z-index: 70;
+  min-width: 172px;
+  padding: 5px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+}
+.ctxmenu[hidden] { display: none; }
+
+/* 子菜单（目前只有「复制」用）：叠在父项右侧，悬停才展开 */
+.ctxmenu.sub {
+  position: absolute;
+  left: 100%;
+  top: -6px;
+  display: none;
+}
+.ctxitem.has-sub:hover > .ctxmenu.sub { display: block; }
+
+/* 菜单项。是 <button> 还是 <div> 取决于有没有子菜单 ——
+   有子菜单的父项只负责悬停展开，点它不该触发任何动作。 */
+.ctxitem {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 10px 6px 6px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  font: 12px/1.5 var(--ui);
+  text-align: left;
+  cursor: default;
+}
+.ctxitem.has-sub { position: relative; }
+.ctxitem:hover { background: var(--accent); color: #fff; }
+
+/* 置灰项：仍显示（对齐原版 setDisable），但不可点、不参与悬停高亮 */
+.ctxitem.disabled { color: var(--text-mute); }
+.ctxitem.disabled:hover { background: none; color: var(--text-mute); }
+
+.ctx-label { flex: 1; }
+
+/* 勾选位：给单选类（标记根节点 / 聚焦补丁）留出对齐用的空档 */
+.ctx-check {
+  display: inline-block;
+  width: 14px;
+  color: var(--accent-hi);
+}
+.ctxitem:hover .ctx-check { color: #fff; }
+.ctxitem.disabled:hover .ctx-check { color: var(--accent-hi); }
+
+.ctx-arrow { color: var(--text-mute); font-size: 10px; }
+.ctxitem:hover .ctx-arrow { color: #fff; }
+
+/* -------------------------------------------------------- 聚焦（只看一侧） */
+
+/* 对应原版 HomeView.focusTree：把另一个面板从 SplitPane 里摘掉。
+   这里等价地隐藏它。菜单入口在补丁树的「聚焦补丁」，
+   应用树那侧的菜单还没做，所以 .focus-app 暂时没有触发路径，
+   样式先备着，等左侧菜单补上就能直接用。 */
+body.focus-app #pane-patch,
+body.focus-patch #pane-app { display: none; }
+
+/* 另一棵树收掉时，它的分隔条一起收掉；剩下那棵占满 ——
+   拖动分隔条会把 flex 写成 `0 0 X%`，这里必须还原，否则聚焦后只剩半屏。 */
+body.focus-app .splitter-v,
+body.focus-patch .splitter-v { display: none; }
+body.focus-app #pane-app,
+body.focus-patch #pane-patch { flex: 1 1 auto; }
+
+/* ------------------------------------------------- 查看签名 / 绑定信息 */
+
+.dialog-narrow { width: 520px; }
+
+/* 确认框：比设置框窄一档。正文通常就两三行，宽了反而要来回扫。
+   高度不固定 —— 文案长短差很多（"编译写回"两行、"撤销删除"四行）。 */
+.dialog-confirm { width: 420px; }
+
+/* 正文按空行分段：第一段是"要干什么"（问句），后面是细节。
+   分段靠 JS 按 \n\n 切（见 confirmBox），不在这里用 pre-line ——
+   两段要不同的字重/颜色，一段文本做不到。 */
+.confirm-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--text-dim);
+  /* 段内的单个换行也照原样断行（段与段之间才用 \n\n 拉开 8px 间距） */
+  white-space: pre-line;
+  user-select: text;   /* 提示里常有文件名和路径，可能要复制 */
+}
+/* 问句：字号和颜色都提一档，一眼先看到"到底要问什么" */
+.confirm-text p:first-child {
+  font-size: 13px;
+  color: var(--text);
+}
+.confirm-text p { margin: 0; }
+
+/* 破坏性动作的主按钮（删除、撤销删除）：用 --danger。
+   2026-10-23 之前它借的是 --del（diff 的"删除"语义色）—— 那一档改成灰
+   之后，红色按钮会变成灰按钮，"这一下不可逆"的警示就没了。所以拆成
+   独立令牌：**状态用 --del，危险动作用 --danger**。 */
+.btn-danger {
+  color: #fff;
+  background-color: var(--danger);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0));
+  border-color: var(--danger);
+  box-shadow:
+    var(--danger-shadow),
+    inset 0 1px 0 var(--danger-hi),
+    inset 0 -1px 0 var(--danger-lo);
+}
+.btn-danger:hover:not(:disabled) {
+  background-color: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+.btn-danger:active:not(:disabled) {
+  background-color: var(--danger-press);
+  border-color: var(--danger-press);
+  box-shadow: var(--danger-shadow-press);
+}
+
+/* 绑定信息弹窗：正文要能撑开并自己滚，所以整体改成定高的纵向 flex */
+.dialog-mapped {
+  display: flex;
+  flex-direction: column;
+  width: 760px;
+  height: 70vh;
+  max-height: 70vh;
+}
+
+.modal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.modal-row label {
+  flex: 0 0 52px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: right;
+}
+.modal-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font: 12px/1.5 var(--mono);
+}
+.modal-row input:focus { outline: none; }
+
+/* 绑定信息正文：等宽、可滚动、可选中 */
+.mapped-body {
+  flex: 1;
+  min-height: 240px;
+  margin: 0;
+  padding: 12px 16px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: 12px/1.7 var(--mono);
+  white-space: pre;
+  user-select: text;
+}
+
+/* ------------------------------------------------------- 文件内容预览 */
+
+/* 非模态浮动面板：可拖动（标题栏）、可缩放（右下角）。
+   对应原版 ContentView 那个 Modality.NONE + setResizable(true) 的对话框 ——
+   开着预览还能继续操作两棵树，所以这里不铺遮罩。 */
+.contentwin {
+  position: fixed;
+  z-index: 65;
+  display: flex;
+  flex-direction: column;
+  min-width: 360px;
+  min-height: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  resize: both;              /* 原生缩放手柄（需要 overflow != visible） */
+}
+.contentwin[hidden] { display: none; }
+
+/* 最大化后不再是"可拖动的浮窗"：原生缩放手柄收掉、标题栏换成普通光标。
+   对应系统窗口最大化后拖不动、也拉不出大小。 */
+.contentwin.maxed { resize: none; }
+.contentwin.maxed .contentwin-head { cursor: default; }
+
+.contentwin-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 6px 7px 13px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: move;
+  user-select: none;
+}
+.contentwin-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px var(--mono);
+  color: var(--text-dim);
+}
+.contentwin-head .btn-icon { cursor: pointer; }
+
+/* 差异导航（上一处 / 下一处 + 计数）。只在双栏且确实有差异块时出现
+   （见 app.js 的 updateContentNav），没有差异时整组 hidden、不占位置。
+
+   2026-10-23 按用户"样式改成和 idea 一样的"重排成**一整颗胶囊**：
+   IDEA 的差异导航不是两个各自独立的按钮，而是一条连在一起的控件
+   （它那边竖着贴在编辑区右上角，这里标题栏是横向的，所以横向排）。
+   做法：外框给边框 + 圆角 + 底色，里面两个按钮**去掉自己的边框和圆角**，
+   靠一条 1px 分隔线分区 —— 两颗按钮看起来属于同一个控件，而不是"碰巧
+   挨着的两个按钮"。计数用等宽数字，位数变化时宽度不跳。 */
+.contentwin-nav {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;   /* 让计数那格撑满高度，分隔线才能上下贯通 */
+  gap: 0;
+  border: 1px solid var(--border-hi);
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+  /* 高度跟着标题栏里的 .btn-icon 走，但内边距压到 0 —— 胶囊自己的
+     上下留白由按钮的 padding 撑，避免双层留白把胶囊撑得比关闭按钮还高。 */
+  padding: 0;
+}
+.contentwin-nav[hidden] { display: none; }
+.contentwin-nav .btn-icon {
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-dim);
+}
+.contentwin-nav .btn-icon:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+.contentwin-nav .btn-icon:active:not(:disabled) { background: var(--active); }
+/* 到头了（第一处 / 最后一处）：淡下去而不是消失 —— 位置稳定，用户不用
+   在"能点/不能点"之间重新找按钮。 */
+.contentwin-nav .btn-icon:disabled { color: var(--text-mute); opacity: .55; }
+.contentwin-nav-count {
+  min-width: 34px;
+  padding: 0 2px;
+  text-align: center;
+  font: 11px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-mute);
+  border-left: 1px solid var(--border-hi);
+  border-right: 1px solid var(--border-hi);
+  /* 计数与两侧按钮等高：胶囊是 flex 行，stretch 会让分隔线上下贯通，
+     正好是 IDEA 那种"一条线分区"的效果。 */
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.contentwin-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* 双栏：中间一条分隔线 */
+.contentwin-body.split > .codepane + .codepane { border-left: 1px solid var(--border); }
+
+/* 加载态：.class 反编译要先起一次 JVM（约 1 秒），这段时间给个明确的
+   等待提示，别让用户对着空白面板以为卡死了。 */
+.contentwin-body > .loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--text-mute);
+  font-size: 13px;
+}
+.contentwin-body > .loading::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-hi);
+  border-top-color: var(--text-mute);
+  border-radius: 50%;
+  animation: content-spin .7s linear infinite;
+}
+@keyframes content-spin { to { transform: rotate(360deg); } }
+
+/* ------------------------- 编辑内容（刻意增强） -------------------------
+   右键「编辑内容」进来的编辑模式。同一个浮窗承载预览与编辑，编辑模式多一条
+   底部按钮条 + 一块编辑区。两种形态：文本域（text）与十六进制网格（hex）。
+   原版没有这个功能（它的「编辑模式」菜单项被注释掉了），见 MIGRATION.md。 */
+
+.contentwin-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.contentwin-foot[hidden] { display: none; }
+/* 按钮的 hidden 也要真的藏起来。UA 样式表本来就有 [hidden]{display:none}，
+   但这里写死一条：哪天 .btn 加上 display，属性就会被作者样式盖掉，而
+   "该藏的按钮露出来"这种错很难一眼看出来。 */
+.contentwin-foot .btn[hidden] { display: none; }
+.contentwin-foot .grow { flex: 1; }
+/* 有未保存的修改时把提示染成"修改色" —— 这个状态必须一眼看得见，
+   否则用户关掉面板才发现白改了。 */
+.contentwin-foot .hint.dirty { color: var(--mod); font-weight: 600; }
+/* 提示文字很长（编译引导句 + 文件名等）时必须能收缩成省略号，
+   否则会把它所在的 flex 行撑高、连带把旁边的按钮文字也挤换行。
+   min-width:0 是 flex 子项能收缩的前提，缺一不可。 */
+.contentwin-foot .hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-mute);
+}
+
+/* ------------------------- 编译错误条（刻意增强） -------------------------
+   javac 的报错是多行的（含 "文件路径:行号: 错误: …"、^ 指示符、"N 个错误"），
+   塞进底部那个会自动消失的小 toast 根本看不清、也不能复制。这里给它一个
+   常驻、可滚动、可关闭、可整段复制的展示位：编译失败时填进来，成功或手动
+   关闭时清掉。toast 仍保留作即时通知，但正文只走这里。 */
+.contentwin-err {
+  flex: 0 0 auto;
+  max-height: 42%;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--err-border);
+  background: var(--surface-2);
+}
+.contentwin-err[hidden] { display: none; }
+.contentwin-err-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--err-text);
+  font: 600 12px var(--sans);
+}
+.contentwin-err-head .btn-icon { margin-left: auto; }
+.contentwin-err-body {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font: 12px/1.55 var(--mono);
+  color: var(--err-text);
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.editbox {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 文本编辑：等宽字体。这里**不做语法高亮** —— 编辑态下要重着色得上
+   contenteditable + 增量重算，代价远大于收益；要看着色回预览面板看。 */
+/* 内容面板里的查找条（对应原版 `SearchBox`：输入框 + 命中计数 + 上/下一个 +
+   关闭）。挂在面板正文之上，不遮住代码。 */
+.findbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 3px 6px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.findbar[hidden] { display: none; }
+
+.find-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  font: 12px/1.5 var(--mono);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+.find-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.find-count {
+  flex: none;
+  min-width: 54px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* 预览面板内 Ctrl+F 的命中高亮（需求 Q）。
+   用 CSS Custom Highlight API（::highlight），**不改动渲染层 DOM**，所以反编译
+   代码的语法着色（token span 的颜色）原样保留，只叠一层底色。
+   find-hit 是所有命中、find-active 是当前那个（更深一档，方便定位）。 */
+::highlight(find-hit) {
+  background-color: rgba(255, 213, 0, 0.45);
+}
+::highlight(find-active) {
+  background-color: rgba(255, 145, 0, 0.9);
+}
+
+/* 「跳转行&列」里输入非法时的标记。原版是把输入框内容直接改写成「无效」两个字，
+   那样用户没法接着改；这里只标红、保留输入（见 MIGRATION.md）。 */
+.field input.invalid {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.edit-text {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: var(--surface);
+  color: var(--text);
+  font: 12px/1.55 var(--mono);
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+}
+
+.edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.edit-label { color: var(--text-mute); }
+.edit-charset {
+  padding: 2px 4px;
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: 12px var(--mono);
+}
+
+/* 十六进制网格：偏移 + 16 个字节格 + ASCII 预览。只渲染当前页 ——
+   整段铺出来的话一个 1 MB 的文件就是 6.5 万个输入框，直接卡死。 */
+.hexbox { overflow: hidden; }
+.hex-grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  font: 12px/1.6 var(--mono);
+}
+.hex-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.hex-addr { color: var(--text-mute); user-select: none; }
+.hex-cells { display: inline-flex; gap: 2px; }
+.hex-cell {
+  width: 22px;
+  padding: 0 1px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font: 12px var(--mono);
+  text-align: center;
+  text-transform: uppercase;
+}
+.hex-cell:hover { border-color: var(--border-hi); }
+.hex-cell:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.hex-cell.pad { display: inline-block; width: 22px; }
+.hex-ascii { color: var(--text-dim); user-select: none; }
+
+/* 树行上的"内容已修改"标记。
+   用星号而不是行底色 —— 底色已经被补丁状态（t-add/t-mod/t-del）占用了，
+   那是"补丁对这个文件做了什么"，这是"我改过它"，两个维度别混。 */
+.row .edited {
+  margin-left: 3px;
+  color: var(--mod);
+  font-weight: 700;
+  user-select: none;
+}
+
+/* 一栏 = 行号列 + 正文列，左右排。
+
+   **为什么一行要拆成两列**：行号列原来是 .code 里每行一个 position:sticky
+   的 .ln，一万行就是一万个 sticky 元素，而 sticky 的包含块正是滚动容器
+   本身 —— 滚动时浏览器每帧都要在主线程上把这一万个重排一遍。实测
+   （.workbuddy-ai/mockups/probe_scroll_frames.js，10000 行）平均一帧
+   39ms、74% 的帧超时（≈24fps），就是用户报的"上下滑动卡顿"。
+   拆成"不横滚的行号列 + 横滚的正文列"之后一个 sticky 都不需要，
+   实测回到 18.8ms（16.7ms 是垂直同步的底线，等于没有余量浪费）。 */
+.codepane {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+/* 行号列：**只纵向滚、不横向滚**（overflow:hidden 仍可程序化设 scrollTop，
+   见 app.js 的 syncGutter）。横向不滚，所以行号在横滚时天然钉在左边，
+   不需要 sticky。 */
+.code-gutter {
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+
+/* 代码区：横向纵向都能滚。行号**不在**这里（搬去 .code-gutter 了），
+   所以横滚时它天然不动，不需要 sticky。
+
+   白底 + 14px 逐字对齐原版 theme.css 的 `.code-area`
+   （`-fx-background-color: #ffffff`、`-fx-font-size: 14px`）。
+   行高 17px = 原版字体行高 + `styled-text-area.css` 里的
+   `.paragraph-text { -fx-line-spacing: 1 }`。 */
+.code {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--code-bg);
+  font: 14px/17px var(--mono);
+  user-select: text;
+}
+/* 代码栏可聚焦（makePane 里 tabIndex = 0）：点击代码栏时把焦点带进面板，
+   Ctrl+F 才能路由到"面板内查找"而不是主窗口的全局搜索对话框（见 initFindBar
+   与 initSearch 的注释）。鼠标点出来的焦点不出框，键盘 Tab 过来的保留可见
+   轮廓（与 .fastsearch 同一口径）。 */
+.code:focus:not(:focus-visible) { outline: none; }
+
+/* 正文行。只包一个 .lt（行号搬到 .code-gutter 里去了，见 .codepane 上面
+   那段为什么要拆列的注释），所以用 block 就够，不必再撑一个 flex。 */
+.cline { display: block; }
+
+/* 行号：逐条对齐原版 theme.css 的 `.code-area .lineno`
+   —— 14px、#aeb3c2 字、**白底**、右侧 1px #ebecf0 竖线。
+   斜体来自 RichTextFX `LineNumberFactory` 里那个
+   `Font.font("monospace", ITALIC, 13)` 的默认字体（theme.css 只覆盖了字号，
+   没覆盖字形，所以斜体保留）。
+   宽度由后端补齐的空格撑开（后端给的就是已右对齐的字符串）。
+
+   ⚠️ 这里**不是** `#ddd` 底 + `#666` 字 —— 那是 RichTextFX 的库内默认值，
+   原版 theme.css 把它整条覆盖掉了。照着库默认值抄会得到一套原版根本不长的
+   样子（本移植早期就是这么错的，见 MIGRATION.md）。
+
+   ⚠️ **没有 position:sticky**：以前靠它让行号在横滚时钉住，代价是每个行号
+   都是一个 sticky 元素，一万行就把滚动拖到 24fps（实测见 .codepane 的注释）。
+   现在行号住在不横滚的 .code-gutter 里，压根不需要 sticky。 */
+.code-gutter .ln {
+  flex: 0 0 auto;
+  /* **必须自己声明字体栈**。拆列之前 `.ln` 住在 `.code` 里，靠
+     `.code { font: 14px/17px var(--mono) }` 继承下来；现在它搬进了
+     `.code-gutter` —— `.code` 的**兄弟**节点，继承链断了，会一路落到
+     body 的 Segoe UI 上。而 Segoe UI 是**比例字体**：一个空格比一个数字窄，
+     于是"补齐到等宽"的后端空格 padding 全部失真，行号列宽出 4 种
+     （37.81 / 39.63 / 41.5 / 43.86）、行号左右错开 —— 走查
+     split-glyph-gutter-aligned 就是这么红的。 */
+  font-family: var(--mono);
+  /* **行高必须自己写死 17px**，理由和上面那行 font-family 一样：拆列之后
+     `.ln` 不再继承 `.code { font: 14px/17px }`，`line-height` 会一路从 body
+     拿到 `1.5`，算出来是 21px —— 于是行号列每一行比正文行高 4px，
+     两列**逐行错开**：60 行时 gutter 的 scrollHeight 是 1260、正文是 1020，
+     滚到中间行号就已经和旁边的代码差了好几行（实测数据见 MIGRATION 那条偏差）。
+     这不是"看着别扭"级别的：行号会指向错误的代码行。 */
+  line-height: 17px;
+  /* display:block 有两个作用：
+     ① 让行号盒撑满整行高，mark-* 的 4px 色条与导航的强调色细线才能**首尾相接**
+        连成一条；inline 盒只有文字那么高，一块 20 行的差异块会画成 20 段虚线；
+     ② 行号左对齐的基准从"inline 盒的起点"变成"整列"，与右对齐补齐的
+        行号字符串配合后，多位行号不会左右晃。 */
+  display: block;
+  padding: 0 5px;
+  /* 行号右侧比 padding 多出一段空白：原版 CodeArea 是 StyleClassedTextArea，
+     `LineNumberFactory` 会在行号右边再挂一个"折叠指示器"（一个内容为单个空格
+     的 Label），外加 JavaFX 默认的 4px 图文间距。少了这 1ch + 4px，行号会紧贴
+     着竖线，与原版对不上（实测原版行号栏 ≈ 6.6 个字宽）。 */
+  padding-right: calc(9px + 1ch);
+  background: var(--code-bg);
+  color: var(--code-ln);
+  border-right: 1px solid var(--code-ln-edge);
+  font-style: italic;
+  font-size: 14px;
+  white-space: pre;
+  user-select: none;
+}
+
+/* 正文与行号栏之间还有一段留白（原版实测约 3 个字符宽）：
+   竖线在 x≈111、正文从 x≈162 起（2 倍缩放的截图换算下来约 25px）。 */
+.code .lt {
+  display: block;
+  white-space: pre;
+  padding: 0 12px 0 3ch;
+}
+
+/* 空行也要占一行高 */
+.code .lt:empty::after { content: ''; display: inline-block; }
+
+/* ------------------------------------------- 双栏差异高亮
+
+   **原版双栏不做任何差异标记** —— 差异标记只出现在"差异模式"的单栏
+   行号列上，文本本身也不着色。用户要求双栏也能一眼看出差异处，故补上：
+   刻意的增强，见 MIGRATION.md 的偏差登记。
+
+   三档沿用树里那套颜色语义（t-mod / t-add / t-del）：
+     mark-mod  差异块两边都有内容 -> 改（青蓝）
+     mark-del  只有左栏（被替换的旧文件）有 -> 删（灰）
+     mark-add  只有右栏（补丁里的新文件）有 -> 增（绿）
+
+   呈现方式**返工过三次**，别再顺手改回去：
+
+     行号列  一个 ＋ / － / ~ 符号，回答"这一行是增、删还是改"
+     行底色  整行铺一层浅色（增绿 / 删灰 / 改浅蓝），回答"差异在哪几行"
+     正文    只把**真正变了的词**染状态色，其余文字保留语法着色
+
+   三次返工的来龙去脉：
+     ① 正文铺半透明底色 + 行号栏叠色调
+        -> 用户："把背景改成白色的，代码字体高亮就行了"
+     ② 去掉底色，改成**整行文字**染状态色
+        -> 用户："现在时全部内容高亮，我需要的是关键词高亮就行"
+           （整行染色把语法着色全盖掉了，一整屏同一个颜色）
+     ③ 收窄到"变了的那几个词" + 行号列 3px 色条
+        -> 用户："能否在侧边需要处显示 + 或者 - 来区分是新增代码还是
+           删除代码。并且显示这种高亮"
+           并选定"＋ 新增 / － 删除 / ~ 修改" + "行级背景底色"
+        ⚠️ ③ 把 ① 否掉的**行底色**又加回来了 —— 这是用户明确改主意，
+           不是把 ① 的旧代码抄回来。别再拿 ① 的结论把它删掉。
+
+   符号与色条都画在 .code-gutter 里的 .ln 上 —— 那一列不横滚，所以它们
+   天然钉在左边（拆列前靠 position:sticky 实现，代价见 .codepane 的注释）。
+   `.ln` 自己那层白底在标记行上要换成对应的浅色：否则行号列会把行底色
+   挡住。**两列都要染**（.gline 与 .cline）—— 一行拆成两列之后只染一半，
+   差异行的底色会断成两截。 */
+.cline.mark-mod, .gline.mark-mod { background: var(--mod-bg); }
+.cline.mark-del, .gline.mark-del { background: var(--del-bg); }
+.cline.mark-add, .gline.mark-add { background: var(--add-bg); }
+
+/* 行号左边的 4px 色条：用 background-image 的渐变画，不用 box-shadow ——
+   inset 投影在滚动时要重绘，实测（probe_scroll_frames.js）一万行规模下
+   与不画差不多，但渐变是纯填充、更便宜，没有理由留贵的。 */
+.gline.mark-mod > .ln { background: var(--mod-bg); background-image: linear-gradient(to right, var(--mod) 0 4px, transparent 4px); }
+.gline.mark-del > .ln { background: var(--del-bg); background-image: linear-gradient(to right, var(--del) 0 4px, transparent 4px); }
+.gline.mark-add > .ln { background: var(--add-bg); background-image: linear-gradient(to right, var(--add) 0 4px, transparent 4px); }
+
+/* 行号左边的 ＋ / － / ~ 符号。
+
+   **每一行都要占住这一格**：先给所有行一个空格，再按 mark-* 换成符号。
+   否则带符号的行比不带符号的行宽一个字符，行号会左右错开。
+   `.code-gutter .ln::before` 是 2 个类，`.gline.mark-* > .ln::before` 是 3 个，
+   后者胜出，不需要 !important。
+
+   只在双栏里加：单栏（含差异模式）的行号列没有 mark-* 类，加进去会平白
+   把行号列撑宽一个字符，与原版对不上。 */
+.contentwin-body.split .code-gutter .ln::before { content: ' '; }
+.contentwin-body.split .gline.mark-mod > .ln::before { content: '~'; color: var(--mod); }
+.contentwin-body.split .gline.mark-del > .ln::before { content: '-'; color: var(--del); }
+.contentwin-body.split .gline.mark-add > .ln::before { content: '+'; color: var(--add); }
+
+/* 符号的字体形态：**加粗 + 去掉斜体**（用户反馈"差异处不太明显"）。
+   `.ln` 整体是斜体（对齐原版 RichTextFX 的 `Font.font("monospace", ITALIC, 13)`），
+   符号跟着斜，看着像正文的一部分而不是标记。
+
+   只动字形、不动字宽：`--mono` 是等宽字体栈，等宽字体各字重的字符步进一致，
+   所以行号列不会因此错开 —— 走查的 `split-glyph-gutter-aligned` 钉着这一点
+   （它量的是 `.ln` 的实际宽度，只有一种宽度才算过）。 */
+.contentwin-body.split .gline.mark-mod > .ln::before,
+.contentwin-body.split .gline.mark-del > .ln::before,
+.contentwin-body.split .gline.mark-add > .ln::before {
+  font-weight: 700;
+  font-style: normal;
+}
+
+/* 行内差异：`mk-*` 是后端在**片段**上加的类名（见 content.applyInline），
+   形如 class="keyword mk-mod" —— 语法类名保留，所以
+   `font-weight` 之类的属性继续生效，只有 color 被换掉。
+
+   特异性：`.cline .lt .mk-mod` 是 3 个类，压过 `.lang-java .keyword` 的
+   2 个类，所以**不用 `!important`**。靠特异性而非强制覆盖 ——
+   将来若要再收窄（比如只染标识符不染运算符）不必先拆一层强制覆盖。 */
+.cline .lt .mk-mod { color: var(--mod); }
+.cline .lt .mk-del { color: var(--del); }
+.cline .lt .mk-add { color: var(--add); }
+
+/* ------------------------------------------- 差异导航的当前位置
+
+   点"上一个/下一个差异"跳到的那一块（见 app.js 的 markBlockCurrent）。
+
+   ⚠️ **不要给每一行画外框**。早期这里是
+   `.nav-current { outline: 2px solid var(--accent) }` —— 一个 20 行的差异块
+   就是 20 个上下叠着的框，看着像梯子，而且每一行都被横线切断，正文读起来
+   断断续续。用户 2026-10-23 直接报障："为啥每一行要这么框出来，太影响美观了"。
+
+   改成 **IDEA 那种"块级"标记**：整块连成**一条**竖向的强调色细线，眼睛扫一眼
+   就知道"当前在第几行到第几行"，中间不被任何横线打断。
+
+   两条通道分工明确，互不打架：
+     行号列最左边 4px 色条  = **这一行是增 / 删 / 改**（mark-*，语义色）
+     行号列最右边 3px 细线  = **当前跳到的是这一处**（--accent，位置）
+   之所以把"当前"放在**右**边（紧贴正文那一侧）：左边已经被语义色条占着，
+   再往那儿画会把它盖掉 —— 那套配色是用户三次返工定下来的（见上面长注释）。
+   右边这条也天然连成一线：`.ln` 是等高的块，相邻行的线首尾相接。
+
+   底色只铺一层**极淡**的 accent 洗色，而且用 `background-image` 叠上去、
+   不写 `background-color` —— 差异行本来就有 mark-* 底色，写 color 会把它整条
+   替换掉，语义色就没了。image 层叠在 color 之上，两者共存。
+   （`.cline.mark-*` 用的是 `background` 简写，会把 image 置 none；
+   这条规则排在它后面、特异性同为 2 个类，所以能盖回来。） */
+.cline.nav-current {
+  background-image: linear-gradient(var(--nav-wash), var(--nav-wash));
+}
+/* 行号列那侧的标记只能落在 .ln 上：`.gline.mark-* > .ln` 自己有底色，
+   铺在 .gline 上会被整个盖住。
+
+   三层全是渐变、不用 box-shadow —— 与 mark-* 那条色条同一个理由（见上面
+   "用 background-image 的渐变画，不用 box-shadow"）：.ln 是个 inline 盒，
+   投影在跨片段时的渲染不保证，渐变则一定按 padding 盒铺。
+   层序（从上到下）：强调色细线 → 洗色 → mark-* 的 4px 语义色条。
+
+   `to left` 让强调色落在**右**边缘（padding 盒的右沿，紧贴那 1px 竖线），
+   视觉上就是一条沿着整块右侧往下走的细线。 */
+.gline.nav-current > .ln {
+  background-image:
+    linear-gradient(to left, var(--accent) 0 3px, transparent 3px),
+    linear-gradient(var(--nav-wash), var(--nav-wash));
+}
+/* 有 mark-* 的行：把它的 4px 色条原样带到**第三层**，免得被上面两层顶掉。
+   三个分支写死是因为 CSS 没有"取上一层 background-image"的办法。
+   （特异性 4 个类 > `.gline.mark-* > .ln` 的 3 个，所以不用 !important。） */
+.gline.mark-add.nav-current > .ln {
+  background-image:
+    linear-gradient(to left, var(--accent) 0 3px, transparent 3px),
+    linear-gradient(var(--nav-wash), var(--nav-wash)),
+    linear-gradient(to right, var(--add) 0 4px, transparent 4px);
+}
+.gline.mark-del.nav-current > .ln {
+  background-image:
+    linear-gradient(to left, var(--accent) 0 3px, transparent 3px),
+    linear-gradient(var(--nav-wash), var(--nav-wash)),
+    linear-gradient(to right, var(--del) 0 4px, transparent 4px);
+}
+.gline.mark-mod.nav-current > .ln {
+  background-image:
+    linear-gradient(to left, var(--accent) 0 3px, transparent 3px),
+    linear-gradient(var(--nav-wash), var(--nav-wash)),
+    linear-gradient(to right, var(--mod) 0 4px, transparent 4px);
+}
+
+/* ------------------------------------------- 语法高亮（逐条抄原版 CSS）
+
+   原版是**每个 CodeArea 各挂一份样式表**，所以同一个类名（比如 keyword）
+   在不同语言里可以是不同颜色。HTML 只有一份全局样式表，所以这里按语言
+   加一层作用域（.lang-java .keyword 之类），颜色值照抄各 *-style.css。 */
+
+/* java-style.css */
+.lang-java .keyword   { color: purple;      font-weight: bold; }
+.lang-java .semicolon {                      font-weight: bold; }
+.lang-java .paren     { color: firebrick;   font-weight: bold; }
+.lang-java .bracket   { color: darkgreen;   font-weight: bold; }
+.lang-java .brace     { color: teal;        font-weight: bold; }
+.lang-java .string    { color: blue; }
+.lang-java .comment   { color: cadetblue; }
+
+/* javascript-style.css */
+.lang-javascript .keyword   { color: purple;        font-weight: bold; }
+.lang-javascript .string    { color: blue; }
+.lang-javascript .comment   { color: green; }
+.lang-javascript .paren     { color: firebrick;     font-weight: bold; }
+.lang-javascript .brace     { color: darkgoldenrod; font-weight: bold; }
+.lang-javascript .bracket   { color: darkgoldenrod; font-weight: bold; }
+.lang-javascript .semicolon { color: firebrick;     font-weight: bold; }
+
+/* html-style.css */
+.lang-html .html-tag       { color: #800000; font-weight: bold; }
+.lang-html .html-attribute { color: #008000; font-weight: bold; }
+.lang-html .html-comment   { color: #808080; font-style: italic; }
+.lang-html .html-string    { color: #0000FF; }
+.lang-html .html-doctype   { color: #800080; font-style: italic; }
+
+/* css-style.css */
+.lang-css .keyword     { color: #0000FF; font-weight: bold; }
+.lang-css .selector    { color: #800080; font-weight: bold; }
+.lang-css .property    { color: #FF0000; }
+.lang-css .value       { color: #008000; }
+.lang-css .punctuation,
+.lang-css .terminator  { color: #000000; }
+.lang-css .comment     { color: #808080; font-style: italic; }
+
+/* xml-style.css */
+.lang-xml .xml-tag       { color: #800000; font-weight: bold; }
+.lang-xml .xml-attribute { color: #000080; font-weight: bold; }
+.lang-xml .xml-string    { color: #008000; }
+.lang-xml .xml-comment   { color: #808080; font-style: italic; }
+
+/* yaml-style.css */
+.lang-yaml .yaml-keyword { color: #569CD6; font-weight: bold; }
+.lang-yaml .yaml-string  { color: #CE9178; }
+.lang-yaml .yaml-comment { color: #6A9955; }
+.lang-yaml .yaml-number  { color: #B5CEA8; }
+.lang-yaml .yaml-key     { color: #9CDCFE; }
+.lang-yaml .yaml-anchor  { color: #DCDCAA; font-style: italic; }
+.lang-yaml .yaml-alias   { color: #DCDCAA; font-weight: bold; }
+
+/* sql-style.css */
+.lang-sql .keyword { color: #0000FF; font-weight: bold; }
+.lang-sql .string  { color: #008000; }
+.lang-sql .number  { color: #FF4500; }
+.lang-sql .comment { color: #808080; font-style: italic; }
+
+/* 差异模式下顶部那两行 --- / +++ 不参与语法着色，原版也没特殊处理，
+   这里不加样式，保持与之一致。 */

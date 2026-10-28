@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PatchAssistant2J</title>
+<!-- 主题引导：必须**在样式表之前**把 data-theme 定下来，否则暗色用户每次
+     启动都会先白屏一闪再变暗。这段刻意内联而不放进 app.js —— app.js 是
+     <body> 末尾加载的，等它跑完第一帧已经画出去了。
+     存 localStorage 而不是发请求问 Go：Go 版 GUI 没有配置文件，设置项本来
+     就全是会话级的（见 gui/app.go 的 ApplySettings 说明）。
+     try/catch 兜底：WebView 禁用站点数据时 localStorage.getItem 会抛。
+     取值与 app.js 的 THEMES 一致：light / graphite / oled。
+     这里刻意**不做白名单过滤**而只认那三个值：用户万一存进别的值，
+     就当亮色（removeAttribute 的效果）—— 宁可回落也不猜。 -->
+<script>
+(function () {
+  try {
+    var t = window.localStorage.getItem('patchassistant.theme');
+    if (t === 'graphite' || t === 'oled') {
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  } catch (e) { /* 拿不到就按亮色，本来亮色就是默认值 */ }
+})();
+</script>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="toolbar">
+  <!-- 工具栏最左边**只有应用图标，不带文字**（2026-10-16 用户要求去掉品牌名）。
+       图标不是这里的元素，而是 .brand::before 里的 brand.png（见 app.css）。
+       应用名 + 作者署名**仍然保留在窗口标题栏**（gui/main.go 的 windowTitle，
+       值 = constant.AppName + " By " + constant.AppAuthorName）——
+       任务栏 / Alt-Tab 看得到，界面里不再重复一遍。
+       注意 windowTitle 那句**必须**拿 constant 拼：写死字符串会让
+       AppAuthorName 变成未被引用的常量、被编译器消除，exe 里就搜不到作者名。 -->
+  <span class="brand"></span>
+
+  <button id="btn-open-app" class="btn">打开应用包</button>
+  <button id="btn-open-patch" class="btn">打开补丁包</button>
+  <button id="btn-refresh" class="btn" disabled>重新匹配</button>
+  <button id="btn-collapse-all" class="btn" title="收起两棵树里所有已展开的节点">全部折叠</button>
+  <button id="btn-single-view" class="btn" title="只显示应用包这一侧，方便把单个文件拖到具体文件上替换内容">单包视图</button>
+
+  <span class="grow"></span>
+
+  <!-- 搜索按钮：原版 HomeView.buildHeader 里那个**只有图标**的按钮
+       （`new Button()` + `setGraphic(new ImageView(search.png))`，无文字）。
+       图标**不用原版的 search.png**（那是带十字准星的粗体放大镜），换成细线条
+       放大镜（2026-10-16 用户要求，登记在 MIGRATION §五 58）。
+       用内联 SVG 而不是再放一张 PNG：
+         - `stroke="currentColor"` 能跟着 .btn-icon 的 hover / disabled 变色；
+         - `dist/icons/` 是"原样搬运自原版"的目录，守门测试要求与原版逐字节
+           一致且与常量表一一对应，不能往里塞新图（新资产放 dist 根目录）。
+       按钮补了 aria-label：原来那个可访问名来自 `<img alt="搜索">`，
+       换成 aria-hidden 的 SVG 后要自己给。 -->
+  <button id="btn-search" class="btn btn-icon" title="搜索（Ctrl+F）" aria-label="搜索">
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="7" cy="7" r="5.1"/>
+      <path d="M10.9 10.9 14.2 14.2"/>
+    </svg>
+  </button>
+  <!-- 「对比」是移植版新增入口（原版没有）：两个文件或包选完直接比内容。
+       之所以单独开一个对话框而不是复用左边两棵树 —— 那边跑的是补丁语义
+       （README 指令 / 匹配 / 增删改统计），这里只回答"哪些文件不同"。 -->
+  <button id="btn-compare" class="btn" title="对比两个文件或包的内容差异">对比</button>
+  <button id="btn-settings" class="btn">设置</button>
+  <button id="btn-run" class="btn btn-primary" disabled>执行打补丁</button>
+
+  <!-- 窗口按钮：窗口是无边框的（gui/main.go 的 Frameless: true），原生标题栏没了，
+       这三个按钮就搬到这里（紧跟「执行打补丁」之后，顺序对齐 Windows 的最小化·最大化·关闭）。
+       点击走 window.runtime 的 WindowMinimise / WindowToggleMaximise / Quit（见 app.js 的
+       initWindowControls）。图标用内联 SVG，免得再往 icons/ 塞三张位图。 -->
+  <span class="win-ctls">
+    <button id="btn-win-min" class="win-ctl" type="button" title="最小化" aria-label="最小化" tabindex="-1">
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10" stroke="currentColor" stroke-width="1.2"/></svg>
+    </button>
+    <button id="btn-win-max" class="win-ctl" type="button" title="最大化" aria-label="最大化" tabindex="-1">
+      <svg class="win-ico-max" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.6" y="0.6" width="8.8" height="8.8" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+      <svg class="win-ico-restore" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.6" y="2.6" width="6.8" height="6.8" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M2.6 2.6V0.6h6.8v6.8h-2" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+    </button>
+    <button id="btn-win-close" class="win-ctl win-ctl-close" type="button" title="关闭" aria-label="关闭" tabindex="-1">
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0.7 0.7l8.6 8.6M9.3 0.7l-8.6 8.6" stroke="currentColor" stroke-width="1.2"/></svg>
+    </button>
+  </span>
+</header>
+
+<main class="panes">
+  <section class="pane" id="pane-app" data-side="app">
+    <!-- 头部只承载"打开整包"这一条拖放语义：落在头部 = 落在空白处（没有 .row），
+         松手就是打开这个 jar。拖到下面某一行上则是"加进/替换那个目录里的文件"，
+         见 app.js onFileDrop 与 Go 的 HandleDrop。给个 title 让这条分工能被发现。 -->
+    <div class="pane-head" title="把 .jar 拖到这里：打开成应用包（拖到下面某一行上，则是把这个文件加进那一行）">
+      <span class="pane-title">应用包</span>
+      <span class="pane-path" id="app-path">未打开</span>
+    </div>
+    <div class="tree" id="app-tree"></div>
+  </section>
+
+  <!-- 两棵树之间的分隔条（对应原版 HomeView 里 topPane 这个 SplitPane 的 divider） -->
+  <div class="splitter splitter-v" id="split-v" title="拖动调整左右宽度"></div>
+
+  <section class="pane" id="pane-patch" data-side="patch">
+    <div class="pane-head" title="把 .jar / .zip 或目录拖到这里：打开成补丁包">
+      <span class="pane-title">补丁包</span>
+      <span class="pane-path" id="patch-path">未打开</span>
+    </div>
+
+    <!-- 拖入的文件：把文件拖到右侧后，这里逐条列出"手上拿的是什么"。
+         之前拖进来右侧一片空白（尤其补丁包没打开时），看不出到底拖没拖成功、
+         拖的是哪个文件 —— 反馈全靠底部提示，太远。
+         一次拖多个就列多行（名字 + 体积 + 所在目录），空着时整块隐藏。
+         渲染见 app.js 的 renderDropFile。 -->
+    <div class="dropfile" id="drop-file" hidden>
+      <div class="dropfile-head">
+        <span class="dropfile-title">拖入的文件</span>
+        <span class="dropfile-count" id="drop-file-count"></span>
+        <span class="grow"></span>
+        <button class="btn btn-sm" id="drop-file-clear" title="清掉这条记录，不改动任何内容">清除</button>
+      </div>
+      <ul class="dropfile-list" id="drop-file-list"></ul>
+    </div>
+    <!-- 临时补丁：Go 版新增，原版没有这个概念。
+         用户在应用树上「标记删除」的文件会汇总到这里 —— 补丁包本身
+         没有这些文件，但"这次要删掉它们"的意图需要有地方落脚，
+         否则删多了根本记不清、也没法在打补丁前统一核对。
+         空列表时整块隐藏（占地方又没有信息量）。
+         渲染见 app.js 的 renderTempPatch，数据来自 State.manualDelList。 -->
+    <div class="temppatch" id="temp-patch" hidden>
+      <div class="temppatch-head">
+        <span class="temppatch-title">临时补丁 <b id="temp-patch-count">0</b></span>
+        <span class="temppatch-hint">标记删除的文件将不会写入新包</span>
+        <!-- 撤销本包所有「删除 / 标记删除」并重载应用树。
+             这是唯一的整体出口：物理删除的节点已经不在树上，右键都点不到。 -->
+        <button class="btn btn-sm" id="temp-patch-clear"
+                title="撤销本包所有「删除 / 标记删除」，并按原包重新加载应用树">全部撤销</button>
+      </div>
+      <ul class="temppatch-list" id="temp-patch-list"></ul>
+    </div>
+    <div class="tree" id="patch-tree"></div>
+  </section>
+
+  <!-- 匹配连线层：两棵树之间"补丁里的这个文件 ←→ 应用包里的那一行"的曲线。
+       放在 .panes 里是为了能跨过分隔条（线要走分隔条这条通道，不能压在树上），
+       pointer-events: none 保证不挡树的点击与滚轮。
+       配对数据来自 State.mappedLinks（Go 侧算好，两端是 dom 路径），
+       画法见 app.js 的 linksDraw。 -->
+  <svg class="links" id="links" aria-hidden="true"></svg>
+</main>
+
+<!-- 树区与「补丁信息」之间的分隔条（对应原版 HomeView 里 centrePane 的 divider，垂直） -->
+<div class="splitter splitter-h" id="split-h" title="拖动调整高度"></div>
+
+<!-- 补丁信息：对应原版 HomeView.buildBottomCentre 的「补丁信息」TitledPane。
+     里面按固定顺序显示"警告（补丁比对提示）"和"说明（README 正文）"，
+     拼装规则见 app.js 的 patchInfoText —— 逐条对齐 updatePatchInfo。 -->
+<section class="info-pane">
+  <div class="pane-head">
+    <span class="pane-title">补丁信息</span>
+    <!-- 有待替换结果时亮一个角标。清单在面板里、位置靠下，不加这个提示
+         很容易"拖完不知道下头有东西要看"（真实反馈：下方信息不太明显）。 -->
+    <span class="pane-badge" id="info-badge" hidden></span>
+  </div>
+
+  <!-- 拖入待替换：把「单个文件拖到右侧后按名反查」的命中结果落在这里。
+       为什么不用弹窗：弹窗里点一行就替换，等于**没看就动手**；放到面板里
+       之后是两步 —— 点一行先在应用树里定位并选中它，人看过内容确认没错，
+       再点右上角「替换到选中项」。渲染见 app.js 的 showPending。 -->
+  <div class="pending" id="pending" hidden>
+    <div class="pending-head">
+      <span class="pending-title" id="pending-title">拖入的文件</span>
+      <span class="pending-hint" id="pending-hint"></span>
+      <span class="grow"></span>
+      <button class="btn btn-sm" id="pending-cancel" title="放弃这次拖入，不改动应用包">取消</button>
+      <button class="btn btn-sm btn-primary" id="pending-ok" disabled>替换到选中项</button>
+    </div>
+    <ul class="pending-list" id="pending-list"></ul>
+    <!-- 按路径匹配：名字反查不到时（比如那个文件本来就不在包里），
+         直接把包内路径粘进来定位。也能在已有候选里手动指定一处。
+         回车等同点「定位」。
+         类名是 pathrow 而不是 path —— .pending-path 已经被"候选的路径文字"
+         占了，重名会让候选那行被套上容器的 padding/白底（踩过一次）。 -->
+    <div class="pending-pathrow">
+      <input type="text" id="pending-path-input" spellcheck="false"
+             placeholder="包里没有？粘贴包内路径按路径匹配，如 BOOT-INF/classes/a/b/Foo.class">
+      <button class="btn btn-sm" id="pending-path-go">定位</button>
+    </div>
+    <!-- 按路径定位的解释行。粘进来的东西不一定是"一个能替换的文件"
+         （最常见的是右键「复制路径」复制了一个**目录**），这时候光在底部
+         弹一句提示不够 —— 它几秒就没了，而用户正需要照着做下一步。 -->
+    <div class="pending-note" id="pending-note" hidden></div>
+  </div>
+
+  <pre class="info-body" id="info-body"></pre>
+</section>
+
+<footer class="statusbar">
+  <span class="stat stat-add"><b id="st-add">0</b> 新增</span>
+  <span class="stat stat-mod"><b id="st-mod">0</b> 修改</span>
+  <span class="stat stat-del"><b id="st-del">0</b> 删除</span>
+  <span class="sep"></span>
+  <span class="stat" id="st-app">应用包 —</span>
+  <span class="stat" id="st-patch">补丁包 —</span>
+  <span class="grow"></span>
+  <span class="stat stat-msg" id="st-msg"></span>
+</footer>
+
+<!-- 设置 -->
+<div class="overlay" id="settings-overlay" hidden>
+  <div class="dialog">
+    <div class="dialog-head">
+      <span>设置</span>
+      <button class="btn btn-icon" id="btn-settings-close" title="关闭">✕</button>
+    </div>
+
+    <div class="dialog-body">
+      <!-- 分组对齐原版 ConfigView 的 TitledPane：原版是「常规配置 / 搜索配置 /
+           补丁配置」三组。这里三组都有 —— 「常规配置」2026-10-21 补了回来：
+           之前它下面只有主题与语言两项，而 Go 版没有第二种可选值，摆上去是
+           空组；加了暗色主题之后主题这一项就有得选了（语言仍是中文写死，
+           见下方注释）。2026-10-22 主题从"明/暗"两档扩到三档：石墨 + 纯黑
+           两套暗色并列，用户自己挑。 -->
+      <section class="set-group">
+        <h4 class="set-group-title">常规配置</h4>
+
+        <label class="field">
+          <span>主题</span>
+          <select id="set-theme">
+            <option value="light">明亮主题</option>
+            <option value="graphite">石墨主题</option>
+            <option value="oled">纯黑主题</option>
+          </select>
+          <!-- 「语言」这一项仍然不放：Go 版界面文案是中文写死的，没有第二种
+               可选值。原版 ConfigView 里它是个 ComboBox，放一个只有一个
+               选项的框只会让人以为坏了。哪天做了 i18n 再加回来。 -->
+          <em>切换后立即生效，重启后仍保持选择</em>
+        </label>
+      </section>
+
+      <section class="set-group">
+        <h4 class="set-group-title">搜索配置</h4>
+
+        <label class="field">
+          <span>保留历史条数</span>
+          <input type="number" id="set-history-limit" min="1" step="1">
+          <em>全局搜索最多保留多少条历史，默认 30</em>
+        </label>
+      </section>
+
+      <section class="set-group">
+        <h4 class="set-group-title">补丁配置</h4>
+
+        <label class="field field-check">
+          <input type="checkbox" id="set-with-path">
+          <span>启用路径匹配</span>
+          <em>补丁条目路径与应用包完全一致时匹配</em>
+        </label>
+
+        <label class="field field-check">
+          <input type="checkbox" id="set-with-name">
+          <span>启用文件名匹配</span>
+          <em>路径不一致时按文件名匹配</em>
+        </label>
+
+        <label class="field field-check">
+          <input type="checkbox" id="set-patch-file-diff">
+          <span>开启补丁文件比对</span>
+          <em>在「补丁信息」里提示"两边是同一个文件"与"应用比补丁新"</em>
+        </label>
+
+        <label class="field field-check">
+          <input type="checkbox" id="set-show-links">
+          <span>总是显示匹配连线</span>
+          <em>两棵树之间用线连起匹配上的文件；关掉后跟随「开启补丁文件比对」</em>
+        </label>
+
+        <label class="field field-check">
+          <input type="checkbox" id="set-write-sign">
+          <span>写入补丁签名</span>
+          <em>在 META-INF/patch-up/ 下写出 *.sign</em>
+        </label>
+
+        <label class="field">
+          <span>参与匹配的补丁文件正则</span>
+          <input type="text" id="set-regex" spellcheck="false">
+        </label>
+
+        <label class="field">
+          <span>补丁说明文件名</span>
+          <input type="text" id="set-readme" spellcheck="false">
+        </label>
+
+        <label class="field">
+          <span>操作人员</span>
+          <input type="text" id="set-user" spellcheck="false">
+          <em>写进补丁签名，留空则取系统用户名</em>
+        </label>
+      </section>
+    </div>
+
+    <div class="dialog-foot">
+      <span class="hint" id="set-hint">改动只影响后续操作，需重新匹配后生效</span>
+      <button class="btn btn-primary" id="btn-settings-apply">应用</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- 全局搜索（对应原版 view/search/SearchView）。
+     原版是个 WINDOW_MODAL 的可缩放对话框：上面一个输入框、下面一个结果列表，
+     输入即搜（没有防抖，靠版本号丢弃过期结果），空关键词时展示搜索历史。
+     这里用遮罩式弹窗（与「设置」等其它对话框一致），尺寸固定 —— 原版会把
+     窗口尺寸写进 application.xml，Go 版 GUI 没有配置文件，见 MIGRATION.md。 -->
+<div class="overlay" id="search-overlay" hidden>
+  <div class="dialog dialog-search">
+    <div class="dialog-head">
+      <span>搜索</span>
+      <button class="btn btn-icon" id="search-x" title="关闭">✕</button>
+    </div>
+    <div class="dialog-body dialog-body-search">
+      <input type="text" id="search-input" class="search-input" spellcheck="false" aria-label="搜索">
+      <div class="search-list" id="search-list"></div>
+    </div>
+    <div class="dialog-foot">
+      <span class="hint">单击历史记录回填关键词，双击结果跳到那一项</span>
+      <button class="btn" id="search-close">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 内容对比（对应 Go 侧 gui/jarcompare.go + internal/service.ComparePacks / CompareFiles）。
+     用法：两个槽各选一个文件或 jar/zip → 开始对比 → 汇总与明细。
+     两个包 → 逐条目比（ComparePacks）；两个普通文件 → 整份内容比（CompareFiles），
+     文件对比结果里给「查看差异」按钮，用内容预览浮窗并排看两个文件。
+     刻意与主会话隔离：不读两棵树、不跑匹配，关掉也不影响已打开的包。
+     包口径：按文件条目比内容 MD5（目录条目跳过、嵌套 jar 按普通文件算、
+     不过滤 META-INF），"仅 A 有 / 仅 B 有"用中性词 —— 不假设哪边是新的。
+
+     弹窗本身可拖动（按住标题栏）、可缩放（右下角）、可最大化；
+     明细里**每一行都能点开**看这个文件在 A/B 两侧的内容 ——
+     走的是内容预览浮窗（#content-win，z-index 65 盖在本遮罩之上），
+     所以关掉浮窗就回到这份列表，能连着翻看好几个文件。 -->
+<div class="overlay" id="compare-overlay" hidden>
+  <div class="dialog dialog-compare">
+    <div class="dialog-head">
+      <span>对比文件 / 包</span>
+      <!-- 撑开的空隙：让两个图标按钮靠右（.dialog-head 是 space-between，
+           三个子元素时中间那个会被顶到中间去） -->
+      <span class="grow"></span>
+      <!-- 最大化：与内容预览面板同一个图标语言（见 app.js 的 MAX_ICON） -->
+      <button class="btn btn-icon" id="compare-max" title="最大化" aria-label="最大化">
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="2" width="8" height="8" rx="1"/>
+        </svg>
+      </button>
+      <button class="btn btn-icon" id="compare-x" title="关闭">✕</button>
+    </div>
+
+    <div class="dialog-body dialog-body-compare">
+      <div class="cmp-slot" data-slot="a">
+        <span class="cmp-slot-tag">A</span>
+        <input class="cmp-path" type="text" id="cmp-path-a" readonly spellcheck="false" placeholder="选择或拖入第一个文件 / 包">
+        <button class="btn" id="cmp-pick-a">浏览…</button>
+      </div>
+      <div class="cmp-slot" data-slot="b">
+        <span class="cmp-slot-tag">B</span>
+        <input class="cmp-path" type="text" id="cmp-path-b" readonly spellcheck="false" placeholder="选择或拖入第二个文件 / 包">
+        <button class="btn" id="cmp-pick-b">浏览…</button>
+      </div>
+
+      <div class="cmp-actions">
+        <button class="btn btn-primary" id="cmp-run">开始对比</button>
+        <span class="hint">按内容（MD5）比对；也可把文件或包直接拖到上面的槽里；两个包比包内条目，两个文件比整份内容</span>
+      </div>
+
+      <!-- 嵌套展开的面包屑：展开 lib 下的嵌套 jar 后出现，带「← 返回」与当前路径 -->
+      <div class="cmp-crumb" id="cmp-crumb" hidden></div>
+
+      <div class="cmp-result" id="cmp-result" hidden></div>
+    </div>
+
+    <div class="dialog-foot">
+      <button class="btn" id="cmp-copy" disabled>拷贝报告</button>
+      <button class="btn" id="cmp-save" disabled>保存报告</button>
+      <span class="grow"></span>
+      <button class="btn btn-primary" id="cmp-close">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 补丁树右键菜单：内容全部由后端算好（见 app.js 的 buildMenu） -->
+<div class="ctxmenu" id="ctxmenu" hidden></div>
+
+<!-- 查看签名（对应原版 PatchSignView：三个只读文本框） -->
+<div class="overlay" id="sign-overlay" hidden>
+  <div class="dialog dialog-narrow">
+    <div class="dialog-head">
+      <span>补丁签名信息</span>
+      <button class="btn btn-icon" id="sign-close" title="关闭">✕</button>
+    </div>
+    <div class="dialog-body" id="sign-body"></div>
+  </div>
+</div>
+
+<!-- 确认框：替代原生 window.confirm。
+     原生那个在 WebView2 里会顶一条「wails.localhost 显示」的标题栏、按钮也是
+     系统样式，跟整个界面完全两个世界；而且它同步阻塞，弹着的时候整页都停住。
+     这里用同一套 .overlay/.dialog，外观与设置、签名那些弹窗一致。
+     接口是 Promise（见 app.js 的 confirmBox）—— 确定 true，取消/点遮罩/Esc 都是 false。 -->
+<div class="overlay" id="confirm-overlay" hidden>
+  <div class="dialog dialog-confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="dialog-head">
+      <span id="confirm-title">确认</span>
+    </div>
+    <div class="dialog-body">
+      <div class="confirm-text" id="confirm-text"></div>
+    </div>
+    <div class="dialog-foot">
+      <span class="hint" id="confirm-hint"></span>
+      <button class="btn" id="confirm-cancel">取消</button>
+      <button class="btn btn-primary" id="confirm-ok">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 查看绑定信息（对应原版 NodeMappedView：只读文本 + 保存/拷贝） -->
+<div class="overlay" id="mapped-overlay" hidden>
+  <div class="dialog dialog-mapped">
+    <div class="dialog-head">
+      <span>节点绑定信息</span>
+      <button class="btn btn-icon" id="mapped-x" title="关闭">✕</button>
+    </div>
+    <pre class="mapped-body" id="mapped-body"></pre>
+    <div class="dialog-foot">
+      <span class="hint">标记含义：+ 新增 / ! 修改 / - 删除；制表符后是它绑定到的应用侧路径</span>
+      <button class="btn" id="mapped-save">保存为文件</button>
+      <button class="btn" id="mapped-copy">拷贝信息</button>
+      <button class="btn btn-primary" id="mapped-close">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 文件内容预览（对应原版 ContentView）。
+     刻意**不用**遮罩层：原版的对话框是 Modality.NONE（非模态）且可缩放，
+     用户开着预览还能继续操作两棵树。这里做成可拖动、可缩放的浮动面板。
+
+     同一个面板也承载「编辑内容」（右键菜单进来）—— 编辑模式多一条底部按钮条，
+     见 app.js 的 openEditor / renderEditor。 -->
+<div class="contentwin" id="content-win" hidden>
+  <div class="contentwin-head" id="content-head">
+    <span class="contentwin-title" id="content-title"></span>
+    <!-- 差异导航：只在**双栏且确实有差异块**时出现（见 app.js 的
+         updateContentNav）。对比结果里差异可能散在几千行中，靠手动滚动
+         找太慢 —— 面板又常被用来逐个翻看，所以给一对"上一处/下一处"。
+         计数形如 3/8；没有差异时整组隐藏，不占标题栏空间。 -->
+    <span class="contentwin-nav" id="content-nav" hidden>
+      <button class="btn btn-icon" id="content-nav-prev" title="上一个差异" aria-label="上一个差异">
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="3,7.5 6,4.5 9,7.5"/>
+        </svg>
+      </button>
+      <span class="contentwin-nav-count" id="content-nav-count"></span>
+      <button class="btn btn-icon" id="content-nav-next" title="下一个差异" aria-label="下一个差异">
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="3,4.5 6,7.5 9,4.5"/>
+        </svg>
+      </button>
+    </span>
+    <!-- 用 SVG 而不是 "□"/"✕" 两个 Unicode 字符：它们在 Segoe UI 里
+         渲染尺寸本来就对不上（□ 是窄矩形、✕ 是两条交叉粗笔），靠字体
+         兜不出"两个按钮一样大"。SVG 用同 viewBox + 同 stroke，画出来
+         才是真正等大的两个图标。 -->
+    <button class="btn btn-icon" id="content-max" title="最大化" aria-label="最大化">
+      <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2" y="2" width="8" height="8" rx="1"/>
+      </svg>
+    </button>
+    <button class="btn btn-icon" id="content-x" title="关闭" aria-label="关闭">
+      <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="3" y1="3" x2="9" y2="9"/>
+        <line x1="9" y1="3" x2="3" y2="9"/>
+      </svg>
+    </button>
+  </div>
+  <div class="contentwin-body" id="content-body"></div>
+  <div class="contentwin-err" id="content-err" hidden>
+    <div class="contentwin-err-head">
+      <span>编译错误</span>
+      <button class="btn btn-icon" id="content-err-x" title="关闭">✕</button>
+    </div>
+    <pre class="contentwin-err-body" id="content-err-body"></pre>
+  </div>
+  <div class="contentwin-foot" id="content-foot" hidden>
+    <button class="btn" id="content-bytes" hidden>改字节</button>
+    <button class="btn" id="content-compile" hidden>编译为 .class</button>
+    <span class="hint" id="content-edithint"></span>
+    <span class="grow"></span>
+    <button class="btn" id="content-revert">还原</button>
+    <button class="btn" id="content-saveas">另存为</button>
+    <button class="btn btn-primary" id="content-save">保存</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
