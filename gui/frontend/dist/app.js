@@ -302,6 +302,20 @@
       name.appendChild(tag);
     }
 
+    /* 整体替换项标签（本轮新增，见 Go 侧 tree.Node.WholeReplace）。
+       配合 node.mapped 一起看：标了但没映射上，说明应用树里找不到名字
+       包含它的包 —— 这是用户唯一能发现的线索，必须显眼。 */
+    if (node.wholeReplace) {
+      var wr = document.createElement('span');
+      wr.className = 'tag-whole' + (node.mapped ? '' : ' tag-whole-unmatched');
+      wr.textContent = node.mapped ? '整体替换' : '整体·未匹配';
+      wr.title = node.mapped
+        ? '已标记为整体替换项：这个包会整个替换应用树里的对应包，内部不再参与逐文件匹配'
+        : '已标记为整体替换项，但应用树里没找到名字包含它的包。' +
+          '检查应用包是否已打开、以及应用里那个包的名字（如 account-server）是否出现在这个文件名里';
+      name.appendChild(wr);
+    }
+
     if (!node.dir) {
       if (node.modTime) {
         var mt = document.createElement('span');
@@ -2636,6 +2650,17 @@
           node.type === 'customRoot' ? '已取消根节点标记' : '已标记为根节点');
       case 'markReadme':
         return runState('MarkReadme', [node.path], '已设为说明文件');
+      case 'unmarkReadme':
+        /* 标错了能退回来。取消后后端会重新扫一遍，把说明文本和按它做的
+           映射一起清掉（RefreshReadmeNode 里扫不到 README 时清状态）。 */
+        return runState('UnmarkReadme', [node.path], '已取消说明文件标记');
+      case 'wholeReplace':
+        /* 本轮新增，原版没有。补丁包里套着几个"服务各自的完整包"时，
+           把它们标成整体替换项 —— 这个包整个换掉应用里的对应项，内部不再
+           参与逐文件匹配（内层包的 README 在第二层，扫不到）。
+           单选切换：已标记再点就是取消。 */
+        return runState('ToggleWholeReplace', [node.path],
+          node.wholeReplace ? '已取消整体替换' : '已标记为整体替换项');
       case 'editContent':
         return openEditor(treeKey, node);
       case 'saveFile':

@@ -1,53 +1,19 @@
-# ── 构建产物 ─────────────────────────────────────────────
-# 可执行文件（根目录的 pa.exe / gui.exe、gui/gui.exe、gui/build/bin/*.exe 都是构建产物）
+# 构建产物
 /pa
 /pa.exe
-/gui.exe
-gui/gui.exe
-gui/build/bin/
 *.exe
-*.dll
-*.so
-*.dylib
-*.test
 
-# Wails 打包/构建产物（注意：gui/frontend/dist 是【手写源码】并被 go:embed 引用，不可忽略，详见 gui/.gitignore）
-report.html
-gui/build/bin/report.html
-
-# ── 测试与覆盖率产物 ─────────────────────────────────────
+# 测试与覆盖率产物
 *.out
-*.prof
 coverage.html
-coverage.txt
 
-# ── 本地诊断 / 备份输出（由脚本生成，随时可重建，不入库）──
-# diag-jar-assoc.ps1 的输出
-jar-assoc-diag.txt
-# register/unregister-jar-association.ps1 自动生成的注册表备份
-*.assoc-backup.txt
-*.log
-*.tmp
-*.bak
-~$*
-
-# ── AI 助手本地工作目录 ─────────────────────────────────
-# .workbuddy-ai/mockups 下是设计稿截图、原型 HTML、探针脚本、state/view 快照（约 10 MB）
-# .workbuddy-ai/memory 是每日开发笔记，若不想入库可再加一行：.workbuddy-ai/
-.workbuddy-ai/mockups/
-
-# ── 依赖 ────────────────────────────────────────────────
-node_modules/
-vendor/
-
-# ── 编辑器 / IDE ────────────────────────────────────────
+# 编辑器
 .idea/
 .vscode/
 *.swp
-*.swo
-*~
 
-# ── 操作系统 ────────────────────────────────────────────
-.DS_Store
-Thumbs.db
-desktop.ini
+# 本地 AI 工作记忆（非项目代码，不入库）
+.workbuddy-ai/
+
+# Wails 构建中间产物
+gui/build/

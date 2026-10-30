@@ -134,3 +134,27 @@ func EncodeString(s string, cs Charset) []byte {
 	}
 	return out
 }
+
+// IsBinary 粗判一段字节是不是二进制（而不是文本）。
+//
+// 判据只有一条：**前 8KB 里出现 NUL 字节**。文本（UTF-8 / GBK / ASCII）里
+// 不会有 0x00，而 zip / jar / class 这类格式的头部很快就有 ——
+// `PK\x03\x04` 与 `\xCA\xFE\xBA\xBE` 之后紧跟的字段里全是 0。
+//
+// 为什么需要它：补丁说明文件理论上必须是文本，但"标记说明文件"的菜单项
+// 只判了"非目录"，压缩包也能标（用户 2026-10-29 把内层 zip 标成了说明文件，
+// 界面直接变乱码）。zip 的二进制丢给 DecodeString 不会报错 ——
+// GB18030 的映射覆盖全部字节组合，能"成功"解出一大段方块和生僻字，还会被
+// ReadMePattern 匹配出一堆不存在的指令。所以解码前先挡一道。
+func IsBinary(b []byte) bool {
+	n := len(b)
+	if n > 8192 {
+		n = 8192
+	}
+	for i := 0; i < n; i++ {
+		if b[i] == 0 {
+			return true
+		}
+	}
+	return false
+}

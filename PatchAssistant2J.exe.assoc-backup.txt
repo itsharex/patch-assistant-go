@@ -1,0 +1,1 @@
+"D:\Download\新建文件夹 (2)\PatchAssistant2J1.3.0\patch-assistant-to-java\PatchAssistant2J.exe" "%1"

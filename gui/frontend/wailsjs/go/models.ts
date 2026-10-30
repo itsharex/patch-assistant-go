@@ -437,6 +437,7 @@ export namespace main {
 	    icon?: string;
 	    mapped?: boolean;
 	    edited?: boolean;
+	    wholeReplace?: boolean;
 	    menu?: MenuItemView[];
 	
 	    static createFrom(source: any = {}) {
@@ -457,6 +458,7 @@ export namespace main {
 	        this.icon = source["icon"];
 	        this.mapped = source["mapped"];
 	        this.edited = source["edited"];
+	        this.wholeReplace = source["wholeReplace"];
 	        this.menu = this.convertValues(source["menu"], MenuItemView);
 	    }
 	

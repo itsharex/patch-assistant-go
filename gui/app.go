@@ -241,6 +241,13 @@ type NodeView struct {
 	// 是两回事，混用会让匹配结果被编辑操作污染。
 	Edited bool `json:"edited,omitempty"`
 
+	// WholeReplace 表示用户把这个节点标记成了"整体替换项"（见 tree.Node.WholeReplace）。
+	//
+	// 前端据此画一个"整体"徽标。配合 Mapped 一起看：wholeReplace 为真而
+	// mapped 为假，说明**标记了但没在应用树里找到目标**，前端标成警示色 ——
+	// 这是用户唯一能发现"这个名字认不出来"的线索。
+	WholeReplace bool `json:"wholeReplace,omitempty"`
+
 	// Menu 是右键菜单的完整内容（两棵树都会填）。
 	Menu []*MenuItemView `json:"menu,omitempty"`
 }
@@ -271,10 +278,16 @@ type MenuItemView struct {
 
 // 菜单动作标识。前端按这些字符串分发，别改字面量。
 const (
-	menuReload         = "reload"
-	menuCancelMapped   = "cancelMapped"
-	menuMarkRoot       = "markRoot"
-	menuMarkReadme     = "markReadme"
+	menuReload       = "reload"
+	menuCancelMapped = "cancelMapped"
+	menuMarkRoot     = "markRoot"
+	menuMarkReadme   = "markReadme"
+	// menuUnmarkReadme「取消说明文件标记」：原版没有 —— 它靠"标另一个文件"
+	// 让旧的自动让位，根下只有一个 .txt 时就没法撤销。
+	menuUnmarkReadme = "unmarkReadme"
+	// menuWholeReplace「标记为整体替换项」（单选，有勾选态）。
+	// 本轮新增，原版没有 —— 见 tree.Node.WholeReplace 的说明。
+	menuWholeReplace   = "wholeReplace"
 	menuSaveFile       = "saveFile"
 	menuSaveSourceFile = "saveSourceFile"
 	menuCopy           = "copy"
@@ -1724,6 +1737,66 @@ func (a *App) MarkReadme(path string) (*State, error) {
 	return a.state(), nil
 }
 
+// UnmarkReadme 取消"说明文件"标记。
+//
+// 原版没有这个反向操作：它靠"把另一个文件标成说明文件"让旧的自动让位
+// （见 MarkReadme 里那句 old.Type = NONE）。但根下只有一个 .txt、或者标错
+// 了一个压缩包时，用户就没有退路 —— 只能关掉包重开。
+//
+// 清状态交给 refreshAllRoots → RefreshReadmeNode：它扫不到 README 时会把
+// rootInfo.ReadmeNode 和 PatchSign.Readme 一起清空（那一步也是本轮补的，
+// 之前不清，取消后说明面板还挂着旧文本、映射还按旧指令跑）。
+//
+// 注意：取消之后 RefreshReadmeNode 仍会按原版规则"自动认根下的 .txt"。
+// 根下如果还有别的 .txt，它会顶上成为新的说明文件 —— 这是上游既有行为。
+func (a *App) UnmarkReadme(path string) (*State, error) {
+	if a.patchTreeInfo == nil {
+		return nil, fmt.Errorf("还没有打开补丁包")
+	}
+	node := findPatchNodeByPath(a.patchTreeInfo.RootNode(), path)
+	if node == nil {
+		return nil, fmt.Errorf("补丁树里找不到节点: %s", path)
+	}
+	if node.Type != constant.TreeNodeTypeReadme {
+		return nil, fmt.Errorf("%s 不是说明文件", node.Name)
+	}
+	node.Type = constant.TreeNodeTypeNone
+
+	a.refreshAllRoots(a.step())
+
+	return a.state(), nil
+}
+
+// ToggleWholeReplace 标记 / 取消"整体替换项"。
+//
+// 本轮新增，原版没有。用途：补丁包里套着几个"服务各自的完整包"时（交付方
+// 常见做法），内层包的 README 在第二层、RefreshReadmeNode 只扫根下扫不到，
+// 逐文件匹配会把内层的 class 乱挑一遍。把它们标成整体替换项后，这个包整个
+// 换掉应用里的对应项，内部不再参与匹配。
+//
+// 改完标记**必须重跑匹配**：取消标记要让这个节点回到常规通道（可能被按名字
+// 命中），标记则要把它从常规通道摘出来、改走整体替换。refresh 会先清空所有
+// 绑定再重跑，两条通道的切换才是干净的。
+func (a *App) ToggleWholeReplace(path string) (*State, error) {
+	if a.patchTreeInfo == nil {
+		return nil, fmt.Errorf("还没有打开补丁包")
+	}
+	node := findPatchNodeByPath(a.patchTreeInfo.RootNode(), path)
+	if node == nil {
+		return nil, fmt.Errorf("补丁树里找不到节点: %s", path)
+	}
+	if !canWholeReplace(node) {
+		return nil, fmt.Errorf("%s 不能标记为整体替换项（只有 .jar/.war/.zip/.ear 可以）", node.Name)
+	}
+	node.WholeReplace = !node.WholeReplace
+
+	if a.appTreeInfo == nil {
+		// 应用包没打开：标记先留着，等打开后再匹配。
+		return a.state(), nil
+	}
+	return a.refresh()
+}
+
 // ---------------------------------------------------------------------------
 // 补丁树右键菜单
 // ---------------------------------------------------------------------------
@@ -1773,6 +1846,25 @@ func (a *App) patchMenu(n, parent *tree.Node) []*MenuItemView {
 	// 4. 标记说明文件
 	if canMarkReadme(n, parent) {
 		items = append(items, a.menuItem(menuMarkReadme, "app.view.right-tree.mark-readme"))
+	}
+	// 4b. 取消说明文件标记：标错了能退回来（原版只能靠"标另一个"顶掉）
+	if canUnmarkReadme(n) {
+		items = append(items, a.menuItem(menuUnmarkReadme, "app.view.right-tree.unmark-readme"))
+	}
+
+	// 5. 标记整体替换项（单选，勾选态表示已标记）。
+	//
+	//    本轮新增，原版没有。补丁包里套着几个"服务各自的完整包"时，内层包的
+	//    README 在第二层、RefreshReadmeNode 扫不到，逐文件匹配必然乱；把它们
+	//    标成整体替换项后，这个包整个换掉应用里的对应项，内部不再参与匹配。
+	//
+	//    只对压缩包类文件开放：整体替换的语义是"这一个包整个换掉"，目录没有
+	//    这个说法（目录要合并走常规匹配或拖拽）。
+	if canWholeReplace(n) {
+		it := a.menuItem(menuWholeReplace, "app.view.right-tree.whole-replace")
+		it.Radio = true
+		it.Checked = n.WholeReplace
+		items = append(items, it)
 	}
 
 	// 5. 编辑内容：**本轮新增，原版没有**（原版那段「编辑模式」菜单项被注释掉了，
@@ -3537,7 +3629,32 @@ func canMarkRoot(n *tree.Node) bool {
 func canMarkReadme(n *tree.Node, parent *tree.Node) bool {
 	return !n.Dir() &&
 		n.Type == constant.TreeNodeTypeNone &&
+		// 压缩包不能当说明书。原版的 claim 只判了"非目录"，于是 zip/jar 也能
+		// 被标成 README —— 而 README 会被当文本解码，二进制进去就是一片乱码，
+		// 还会被指令正则匹配出一堆不存在的条目（用户 2026-10-29 报的"乱码"）。
+		!service.IsArchiveName(n.Name) &&
 		tree.IsRootNode(parent)
+}
+
+// canUnmarkReadme 已标记的说明文件可以取消。
+//
+// 原版没有这一项，靠"标另一个文件"让旧的自动让位（见 MarkReadme 里那句
+// old.Type = NONE）。但根下只有一个 .txt 时就无从撤销，标错了只能重开包 ——
+// 所以补上这个反向操作。
+func canUnmarkReadme(n *tree.Node) bool {
+	return n != nil && !n.Dir() && n.Type == constant.TreeNodeTypeReadme
+}
+
+// canWholeReplace 判断节点能不能被标成"整体替换项"。
+//
+// 只放压缩包类文件（.jar/.war/.zip/.ear）：整体替换的语义是"这一个包整个
+// 换掉应用里的对应项"，目录和普通文本没有这个说法 —— 它们该走常规匹配。
+func canWholeReplace(n *tree.Node) bool {
+	return n != nil &&
+		!n.Dir() &&
+		n.Type != constant.TreeNodeTypeReadme &&
+		!tree.IsRootNode(n) &&
+		service.IsWholeReplaceName(n.Name)
 }
 
 // toView 把内部节点翻译成前端形态。
@@ -3561,6 +3678,8 @@ func (a *App) toView(n *tree.Node, parent *tree.Node) *NodeView {
 		Icon:     iconName(n),
 		Mapped:   n.MappedNode != nil,
 		Edited:   n.Edited(),
+
+		WholeReplace: n.WholeReplace,
 	}
 	// 右键菜单两棵树都有。补丁树那套是完整移植的 11 项；
 	// 应用树那套只做了本轮用得上的几项，其余登记在 MIGRATION.md §四。

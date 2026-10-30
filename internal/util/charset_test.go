@@ -194,3 +194,47 @@ func TestEncodeStringCoversAllRunes(t *testing.T) {
 		t.Error("非法字节输入不该编出空结果")
 	}
 }
+
+// TestIsBinary 钉住"二进制判定只看 NUL"这条。
+//
+// 用途：补丁说明文件理论上必须是文本，但用户可以（在旧版本里）把 zip 标成
+// README —— zip 的字节丢给 DecodeString 不会报错，只会解出一大段方块和
+// 生僻字。所以解码前先用它挡一道。
+func TestIsBinary(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []byte
+		want bool
+	}{
+		{"zip 头", []byte{'P', 'K', 3, 4, 0, 0, 0, 0}, true},
+		{"class 头", []byte{0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 0x34}, true},
+		{"UTF-8 中文", []byte("补丁说明：+a/x.class\n"), false},
+		{"GBK 中文", []byte{0xB2, 0xB9, 0xB6, 0xA1, 0xCB, 0xB5, 0xC3, 0xF7}, false},
+		{"纯 ASCII", []byte("+a/x.class\n"), false},
+		{"空", nil, false},
+	}
+	for _, c := range cases {
+		if got := IsBinary(c.in); got != c.want {
+			t.Errorf("%s: IsBinary = %v，期望 %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestIsBinaryOnlySniffsHead 只看前 8KB —— 大文件不该被全量扫。
+//
+// 这里顺便钉住"8KB 之后才出现 NUL 也算文本"这个边界：真实文本文件里
+// 不会有 NUL，所以放宽到只看头部不会漏判，但能省掉一次全量遍历。
+func TestIsBinaryOnlySniffsHead(t *testing.T) {
+	b := make([]byte, 9000)
+	for i := range b {
+		b[i] = 'a'
+	}
+	b[8500] = 0 // 落在 8KB 之后
+	if IsBinary(b) {
+		t.Error("8KB 之后的 NUL 不该被计入")
+	}
+	b[100] = 0 // 挪到头部
+	if !IsBinary(b) {
+		t.Error("头部的 NUL 应当判定为二进制")
+	}
+}

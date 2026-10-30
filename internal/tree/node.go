@@ -131,6 +131,22 @@ type Node struct {
 	// Type 节点在补丁流程中的状态
 	Type constant.TreeNodeType
 
+	// WholeReplace 用户标记的"整体替换项"。
+	//
+	// 标记后这个节点被当成一个**原子文件**：它的子级不再逐个按名字去应用树
+	// 里找，而是它自己整体替换应用树里的某一项。补丁包写出时也原样写字节、
+	// 不重打包（`writePatchPackWithZip` 对压缩包节点本来就不递归）。
+	//
+	// 为什么需要这个标记：交付方常把"几个服务各自的完整包"塞进一个外层 zip
+	// （`20261029_account-server_xxx.zip` 这种），而内层包的 README 在第二层，
+	// `RefreshReadmeNode` 只扫根下、扫不到 —— 逐文件匹配必然乱。这种情况下
+	// 用户真正要的语义就是"整个包换掉"，不是"把里面的 class 挑出来"。
+	//
+	// 刻意不复用 Type：Type 表达的是补丁变更类型（ADD/MOD/DEL），而"整体替换"
+	// 是匹配/写出方式的开关，两者正交 —— 同一个节点既可能按名字命中 MOD，
+	// 也可能作为新增项整体放进去。
+	WholeReplace bool
+
 	// Kind 节点种类
 	Kind Kind
 	// Comment 压缩条目的注释，重打包时要原样写回

@@ -371,7 +371,10 @@ func writePatchPackWithZip(ctx *WriteContext, zw *zip.Writer, rootNode *tree.Nod
 			}
 		}
 
-		if len(child.Children) > 0 && !tree.IsCompressNode(child) {
+		// 压缩包节点不递归 —— 它自己的字节已经是完整的包，再把子级摊开写会
+		// 把结构拆散。整体替换项同理：用户标记的语义就是"这个包原样保留"，
+		// 哪怕它的扩展名不在 IsCompressName 里（.war / .ear），也不能摊开。
+		if len(child.Children) > 0 && !tree.IsCompressNode(child) && !child.WholeReplace {
 			if err := writePatchPackWithZip(ctx, zw, child); err != nil {
 				return err
 			}

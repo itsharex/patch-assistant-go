@@ -114,3 +114,7 @@ export function SearchNodesDeep(arg1:string):Promise<Array<main.SearchItemView>>
 export function SetFocusTree(arg1:number):Promise<main.State>;
 
 export function SetWindowBackground(arg1:string):Promise<void>;
+
+export function ToggleWholeReplace(arg1:string):Promise<main.State>;
+
+export function UnmarkReadme(arg1:string):Promise<main.State>;

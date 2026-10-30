@@ -81,6 +81,10 @@
   --del-bg:      #e3e5e8;
   --readme:      #4c6ea8;
   --readme-soft: rgba(76, 110, 168, .10);   /* README 行的底色：能看出来又不吵 */
+  /* 「整体替换项」标签（本轮新增）。选紫：MOD 是青蓝、ADD 是绿、DEL 是灰，
+     紫色能把"这是另一种补丁角色"说清楚，不会看成"又是一个 MOD"。 */
+  --whole:       #6f42c1;
+  --whole-soft:  rgba(111, 66, 193, .10);
   --del-line:    #b6bcc4;   /* 删除线的颜色：比 --del 淡，不抢正文 */
 
   /* 破坏性动作（删除节点、撤销删除、非法输入）。这抹红**不再兼职 diff**，
@@ -247,6 +251,8 @@
   --del-bg:      rgba(152, 162, 174, .16);
   --readme:      #7fb0f5;
   --readme-soft: rgba(127, 176, 245, .14);
+  --whole:       #b392f0;
+  --whole-soft:  rgba(179, 146, 240, .16);
   --del-line:    #6f7885;
 
   /* 破坏性动作：红只留给"点了不可逆"的地方（见 :root 那段分界说明）。 */
@@ -428,6 +434,8 @@
   --del-bg:      rgba(152, 162, 174, .16);
   --readme:      #7fb0f5;
   --readme-soft: rgba(127, 176, 245, .14);
+  --whole:       #b392f0;
+  --whole-soft:  rgba(179, 146, 240, .16);
   --del-line:    #6f7885;
 
   /* 破坏性动作：红只留给"点了不可逆"的地方（见 :root 那段分界说明）。 */
@@ -1613,6 +1621,31 @@ body.single-app #pane-app {
   background: var(--surface);
   border: 1px solid var(--readme);
   border-radius: var(--r-sm);
+}
+
+/* 「整体替换项」标签（本轮新增，见 tree.Node.WholeReplace）。
+   补丁包里套着几个服务各自的完整包时，把它们标成整体替换 —— 这个包整个
+   换掉应用里的对应项，内部不再参与逐文件匹配。
+   和 README 标签用同一套尺寸，但颜色独立（紫），因为它表达的是**另一种
+   补丁角色**，不是"又一个 MOD"。 */
+.tag-whole {
+  flex: none;
+  margin-left: 4px;
+  padding: 1px 6px;
+  font: 10px/14px var(--mono);
+  color: var(--whole);
+  background: var(--whole-soft);
+  border: 1px solid var(--whole);
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+
+/* 标记了、但应用树里认不出目标。换成警示色 —— 这是用户唯一能发现
+   "这个名字认不出来"的线索，静默失败的话他只会以为标记没生效。 */
+.tag-whole-unmatched {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-line);
 }
 
 /* 自定义根节点：它是"这一轮的补丁根"，不是普通目录，得能一眼看出来 */

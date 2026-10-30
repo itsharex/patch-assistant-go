@@ -225,3 +225,11 @@ export function SetFocusTree(arg1) {
 export function SetWindowBackground(arg1) {
   return window['go']['main']['App']['SetWindowBackground'](arg1);
 }
+
+export function ToggleWholeReplace(arg1) {
+  return window['go']['main']['App']['ToggleWholeReplace'](arg1);
+}
+
+export function UnmarkReadme(arg1) {
+  return window['go']['main']['App']['UnmarkReadme'](arg1);
+}

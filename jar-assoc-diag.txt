@@ -1,0 +1,26 @@
+=== .jar UserChoice (per-user default handler) ===
+ProgId : PatchAssistant2J.JAR
+Hash  : AQ1rPd2HCCo=
+
+=== .jar class default + OpenWithProgids ===
+HKCU:\Software\Classes\.jar default : jar_auto_file
+  OpenWithProgids.PatchAssistant2J.JAR = 
+
+=== open command for: UserChoice default (PatchAssistant2J.JAR) ===
+  command : "D:\Download\新建文件夹 (2)\PatchAssistant2J1.3.0\patch-assistant-to-java\patch-assistant-go\gui\build\bin\PatchAssistant2J.exe" "--target=%1"
+  exe     : D:\Download\新建文件夹 (2)\PatchAssistant2J1.3.0\patch-assistant-to-java\patch-assistant-go\gui\build\bin\PatchAssistant2J.exe
+  exists  : yes  size=12999168  modified=10/16/2026 08:36:14
+
+=== open command for: Applications\PatchAssistant2J.exe (Applications\PatchAssistant2J.exe) ===
+  command : "D:\Download\新建文件夹 (2)\PatchAssistant2J1.3.0\patch-assistant-to-java\patch-assistant-go\gui\build\bin\PatchAssistant2J.exe" "--target=%1"
+  exe     : D:\Download\新建文件夹 (2)\PatchAssistant2J1.3.0\patch-assistant-to-java\patch-assistant-go\gui\build\bin\PatchAssistant2J.exe
+  exists  : yes  size=12999168  modified=10/16/2026 08:36:14
+
+=== open command for: PatchAssistant2J.JAR (PatchAssistant2J.JAR) ===
+  command : "D:\Download\新建文件夹 (2)\PatchAssistant2J1.3.0\patch-assistant-to-java\patch-assistant-go\gui\build\bin\PatchAssistant2J.exe" "--target=%1"
+  exe     : D:\Download\新建文件夹 (2)\PatchAssistant2J1.3.0\patch-assistant-to-java\patch-assistant-go\gui\build\bin\PatchAssistant2J.exe
+  exists  : yes  size=12999168  modified=10/16/2026 08:36:14
+
+=== expected Go build location ===
+  D:\Download\新建文件夹 (2)\PatchAssistant2J1.3.0\patch-assistant-to-java\patch-assistant-go\gui\build\bin\PatchAssistant2J.exe
+  exists  : yes  size=12999168  modified=10/16/2026 08:36:14

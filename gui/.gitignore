@@ -2,8 +2,8 @@
 build/bin
 
 # 说明：frontend/dist 不在这里忽略。
-# wails.json 的 frontend:build 留空了，所以 dist 下是【手写源码】
-#（index.html / app.css / app.js），并且被 gui/main.go 的 //go:embed 引用，必须纳入版本控制。
+# wails.json 把 frontend:build 留空了，所以 dist 下是【手写源码】
+# （index.html / app.css / app.js），必须纳入版本控制。
 # 下面这条来自 wails init 的 vanilla 模板 —— 那个模板用 npm 构建 dist，
 # 照抄过来会把我们的源码当产物丢掉。
 node_modules

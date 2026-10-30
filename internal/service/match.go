@@ -114,6 +114,12 @@ func (p *PatchMatchProcessor) Exec() {
 			if node.Type != constant.TreeNodeTypeNone {
 				continue
 			}
+			// 整体替换项走 MatchWholeReplaceNodes 那条独立通道，不参与逐文件
+			// 匹配 —— 它的名字本来就和应用里的对不上，进索引只会白占一个坑，
+			// 甚至可能把本该整体替换的东西拆成一条条 MOD。
+			if node.WholeReplace {
+				continue
+			}
 			if !p.isAcceptPatchFile(node.Name) {
 				continue
 			}
@@ -169,6 +175,10 @@ func (p *PatchMatchProcessor) createPatchNodeMapping(patchNodes []*tree.Node) ma
 	}
 	mapping := make(map[string]*tree.Node, len(patchNodes))
 	for _, node := range patchNodes {
+		// 与 Exec 里 nameMapping 同一口径：整体替换项不参与逐文件匹配。
+		if node.WholeReplace {
+			continue
+		}
 		if !p.isAcceptPatchFile(node.Name) {
 			continue
 		}

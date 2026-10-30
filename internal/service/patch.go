@@ -84,13 +84,28 @@ func RefreshReadmeNode(patchTreeInfo *tree.PatchTreeInfo, rootNode *tree.Node, r
 
 	if readmeNode == nil {
 		step(st, "readme file not found")
+		// 没有说明文件了 → 把旧状态清干净。
+		//
+		// 不清的话"取消标记说明文件"之后 PatchSign.Readme 还是上一次的内容：
+		// 说明面板照旧显示旧文本，refreshMappedNodeWithReadme 还会按旧指令
+		// 继续映射 —— 用户看到的是"取消了但没生效"。
+		rootInfo.ReadmeNode = nil
+		if rootInfo.PatchSign != nil {
+			rootInfo.PatchSign.Readme = ""
+		}
+		patchTreeInfo.UpdateReadmeText()
 		return
 	}
 	step(st, "target readme file: "+readmeNode.Name)
 	readmeNode.Type = constant.TreeNodeTypeReadme
 	rootInfo.ReadmeNode = readmeNode
 	bytes := readNodeBytesOrEmpty(readmeNode)
-	if len(bytes) > 0 {
+	// 二进制内容不解码：把 zip/jar 的字节丢给 DecodeString 不会报错
+	// （GB18030 的映射覆盖全部字节组合），只会解出一大段方块和生僻字，
+	// 再被 ReadMePattern 匹配出一堆不存在的指令 —— 用户看到的就是"乱码"。
+	// 菜单项已经挡掉了压缩包，这里是兜底：补丁包里本来就放了个二进制文件
+	// 当 README 时同样不该解析。
+	if len(bytes) > 0 && !util.IsBinary(bytes) {
 		rootInfo.PatchSign.Readme = util.DecodeString(bytes, util.DetectCharset(bytes))
 	}
 	patchTreeInfo.UpdateReadmeText()
@@ -147,6 +162,125 @@ func RefreshMappedNode(total *tree.TotalInfo, appTreeInfo *tree.AppTreeInfo, pat
 	}
 	refreshMappedNodeWithReadme(total, appTreeInfo, patchTreeInfo, rootNode, opts)
 	RefreshMappedNodeWithPathOrName(total, appTreeInfo, patchTreeInfo, opts)
+	// 整体替换项走独立通道，必须在常规匹配之后 —— 常规匹配的两处索引
+	// （nameMapping / patchNodeMapping）都会跳过被标记的节点，所以这里
+	// 不会和它抢目标。
+	MatchWholeReplaceNodes(total, appTreeInfo, rootNode, opts)
+}
+
+// MatchWholeReplaceNodes 把用户标记的"整体替换项"映射到应用树。
+//
+// 与常规匹配是两条独立通道：被标记的节点不进 nameMapping / patchNodeMapping
+// （见 match.go 的两处 continue），所以它和它的子级都不会被逐文件匹配碰到。
+// 这正是"整体替换"要的语义 —— 内层包里的 class 不该被挑出来单独匹配。
+//
+// 目标判定见 findWholeReplaceTarget。找不到就什么都不做（节点保持未映射，
+// 前端据此显示"未匹配"），不猜、不新建。
+func MatchWholeReplaceNodes(total *tree.TotalInfo, appTreeInfo *tree.AppTreeInfo,
+	rootNode *tree.Node, opts PatchOptions) {
+	if appTreeInfo == nil || rootNode == nil {
+		return
+	}
+	step(opts.Step, "match whole replace nodes")
+
+	var marked []*tree.Node
+	walkTree(rootNode, func(n *tree.Node) {
+		if n.WholeReplace && !n.Dir() {
+			marked = append(marked, n)
+		}
+	})
+	if len(marked) == 0 {
+		return
+	}
+
+	appRoot := appTreeInfo.RootNode()
+	used := make(map[*tree.Node]bool, len(marked))
+	for _, patchNode := range marked {
+		appNode := findWholeReplaceTarget(appRoot, patchNode, used)
+		if appNode == nil {
+			step(opts.Step, "whole replace target not found: "+patchNode.Name)
+			continue
+		}
+		used[appNode] = true
+		// 同一个补丁节点之前可能绑在别处（换过目标或取消重标），先解绑，
+		// 否则它会同时挂在两个应用节点上、统计也会算两遍。
+		if patchNode.MappedNode != nil {
+			CleanMappedNode(total, patchNode.MappedNode, true)
+		}
+		step(opts.Step, "whole replace "+patchNode.Name+" -> "+appNode.Path)
+		MappedModNodeWithType(total, appTreeInfo, appNode, patchNode, opts)
+	}
+}
+
+// findWholeReplaceTarget 在应用树里给整体替换项找目标。
+//
+// 判定是"应用节点的**主名**被补丁名包含"，取主名最长的那个：
+//
+//	补丁 20261029_account-server_存量账户区分变更和普通.zip
+//	应用 BOOT-INF/lib/account-server.jar   → 主名 account-server，命中
+//
+// 为什么不用 MatchPatchName 那套（全等 / jar 前缀）：交付包的命名习惯是
+// "日期_服务名_变更描述"，和包内的真实文件名对不上，前缀匹配也无从下手。
+// 反过来"应用名被补丁名包含"是稳定的 —— 服务名一定出现在补丁名里。
+//
+// 主名短于 3 个字符的候选直接排除：`a.jar` 这种主名几乎能被任何补丁名
+// 包含，放进来只会误命中。
+func findWholeReplaceTarget(appRoot, patchNode *tree.Node, used map[*tree.Node]bool) *tree.Node {
+	if appRoot == nil || patchNode == nil {
+		return nil
+	}
+	var best *tree.Node
+	bestLen := 0
+	walkTree(appRoot, func(n *tree.Node) {
+		if n == appRoot || n.Dir() || used[n] {
+			return
+		}
+		if !IsWholeReplaceName(n.Name) {
+			return
+		}
+		stem := strings.TrimSuffix(n.Name, filepath.Ext(n.Name))
+		if len(stem) < 3 || !strings.Contains(patchNode.Name, stem) {
+			return
+		}
+		if len(stem) > bestLen {
+			best, bestLen = n, len(stem)
+		}
+	})
+	return best
+}
+
+// IsWholeReplaceName 整体替换的目标只能是"整包"类文件。
+//
+// 不用 tree.IsCompressName：那个只认 .jar/.zip，而交付包里被替换的经常是
+// 部署用的 .war / .ear。两者用途不同，不能混 —— IsCompressName 还决定
+// 写出时要不要递归子级，改它会影响打包行为。
+func IsWholeReplaceName(name string) bool { return IsArchiveName(name) }
+
+// IsArchiveName 判断文件名是不是"整包"类（.jar/.war/.zip/.ear）。
+//
+// 与 tree.IsCompressName 刻意分开：那个只认 .jar/.zip，因为它同时决定
+// "写出时要不要递归子级"（改它会动到打包行为）；这里包含部署用的 .war/.ear，
+// 只用于"这东西是个包、不是一份文档"这类判断 —— 比如能不能标成说明文件。
+func IsArchiveName(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jar", ".war", ".zip", ".ear":
+		return true
+	}
+	return false
+}
+
+// walkTree 前序遍历（含自身）。
+//
+// 嵌套压缩包是惰性展开的，没展开的节点 Children 为空 —— 遍历到它就停，
+// 不会凭空读 zip。对找目标来说这没问题：要找的是"包"本身，不是包里的东西。
+func walkTree(node *tree.Node, fn func(*tree.Node)) {
+	if node == nil {
+		return
+	}
+	fn(node)
+	for _, c := range node.Children {
+		walkTree(c, fn)
+	}
 }
 
 // refreshMappedNodeWithReadme 按 README 指令做一轮映射。

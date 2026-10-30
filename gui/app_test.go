@@ -957,7 +957,10 @@ func TestMarkReadmeOverridesAutoDetection(t *testing.T) {
 }
 
 // menuFixtureZip 造一个覆盖各种节点形态的补丁包：
-// 根下的 README、套一层目录的 README、目录、普通文件、内层 jar。
+// 根下的 README、套一层目录的 README、目录、普通文件、根下的压缩包、内层 jar。
+//
+// sub.zip 是 2026-10-29 加的：用来钉住"压缩包不能标说明文件"（见
+// TestPatchMenuClaimsFollowUpstream 里那条 case）。
 func menuFixtureZip(t *testing.T) string {
 	zipPath := filepath.Join(t.TempDir(), "patch.zip")
 	writeZip(t, zipPath, map[string]string{
@@ -966,6 +969,7 @@ func menuFixtureZip(t *testing.T) string {
 		"mypatch/BOOT-INF/classes/com/example/New.class": "x",
 		"leaf.txt":          "#\n",
 		"lib/foo-1.0.0.jar": "jar",
+		"sub.zip":           "PK",
 	})
 	return zipPath
 }
@@ -992,9 +996,10 @@ func TestPatchMenuClaimsFollowUpstream(t *testing.T) {
 	}{
 		{
 			"README.txt",
-			[]string{menuEditContent, menuSaveFile, menuCopy, menuFocusPatchTree},
+			[]string{menuUnmarkReadme, menuEditContent, menuSaveFile, menuCopy, menuFocusPatchTree},
 			"根下的普通文件：能编辑/保存/复制；它已是 README，所以「标记说明文件」不出现" +
-				"（claim 要求 Type == NONE）；不是压缩包条目以外的磁盘文件，故无「资源管理器中查看」",
+				"（claim 要求 Type == NONE），改为出现「取消说明文件标记」（本轮新增，原版靠标另一个顶掉）；" +
+				"不是压缩包条目以外的磁盘文件，故无「资源管理器中查看」",
 		},
 		{
 			"leaf.txt",
@@ -1013,8 +1018,15 @@ func TestPatchMenuClaimsFollowUpstream(t *testing.T) {
 		},
 		{
 			"lib/foo-1.0.0.jar",
-			[]string{menuEditContent, menuSaveFile, menuCopy, menuFocusPatchTree},
-			"压缩包条目没有磁盘路径 -> 没有「资源管理器中查看」",
+			[]string{menuWholeReplace, menuEditContent, menuSaveFile, menuCopy, menuFocusPatchTree},
+			"压缩包条目没有磁盘路径 -> 没有「资源管理器中查看」；" +
+				"多出的「标记为整体替换项」是本轮新增（原版没有），只对 .jar/.war/.zip/.ear 出现",
+		},
+		{
+			"sub.zip",
+			[]string{menuWholeReplace, menuEditContent, menuSaveFile, menuCopy, menuFocusPatchTree},
+			"根下的压缩包：**不能**标说明文件 —— 它会被当文本解码，zip 的二进制进去" +
+				"就是一片乱码（用户 2026-10-29 报的那条）。能标整体替换项",
 		},
 		{
 			"mypatch/BOOT-INF/classes/com/example/New.class",
@@ -3499,6 +3511,176 @@ func TestFindAppCandidatesCarryMd5(t *testing.T) {
 	want := util.Md5([]byte("X-ORIGINAL"))
 	if cands[0].Md5 != want {
 		t.Errorf("候选 md5 = %q，期望 %q（前端要靠它比「内容是否相同」）", cands[0].Md5, want)
+	}
+}
+
+// TestToggleWholeReplace 钉住"整体替换项"的标记 / 取消，以及匹配的切换。
+//
+// 用户 2026-10-29 报障：补丁包里套着几个服务各自的完整包（
+// `20261029_account-server_存量账户区分变更和普通.zip`），内层包的 README
+// 在第二层、扫不到，逐文件匹配必然乱。标记成整体替换后整个换掉应用里的
+// 对应包，内部不再参与匹配。
+func TestToggleWholeReplace(t *testing.T) {
+	dir := t.TempDir()
+	appJar := filepath.Join(dir, "app.war")
+	writeZip(t, appJar, map[string]string{
+		"account-server.jar": "APP-SERVER",
+		"account-web.war":    "APP-WEB",
+	})
+	patchZip := filepath.Join(dir, "patch.zip")
+	writeZip(t, patchZip, map[string]string{
+		"20261029_account-server_存量账户区分变更和普通.zip": "PATCH-SERVER",
+		"20261029_account-web_存量账户区分变更和普通.zip":    "PATCH-WEB",
+	})
+
+	app := newTestApp(t)
+	if _, err := app.OpenAppPack(appJar); err != nil {
+		t.Fatalf("打开应用包失败: %v", err)
+	}
+	s, err := app.OpenPatchPack(patchZip)
+	if err != nil {
+		t.Fatalf("打开补丁包失败: %v", err)
+	}
+	// 前置：交付包的文件名和应用里的对不上，自动匹配不该命中任何东西 ——
+	// 否则下面的断言分不清"标记带来的"和"自动匹配出来的"。
+	if s.Total.Mod != 0 || s.Total.Add != 0 {
+		t.Fatalf("前置条件不成立：自动匹配不该命中，实际 %+v", s.Total)
+	}
+
+	const serverName = "20261029_account-server_存量账户区分变更和普通.zip"
+
+	t.Run("标记后整体替换", func(t *testing.T) {
+		s, err := app.ToggleWholeReplace(serverName)
+		if err != nil {
+			t.Fatalf("标记整体替换失败: %v", err)
+		}
+		got := findNodeByPath(s.AppTree, "account-server.jar")
+		if got == nil || got.Type != "mod" || !got.Mapped {
+			t.Fatalf("account-server.jar 应被整体替换（mod + mapped），实际 %+v", got)
+		}
+		if got := findNodeByPath(s.PatchTree, serverName); got == nil || !got.WholeReplace {
+			t.Fatalf("补丁节点应带上 wholeReplace 标记，实际 %+v", got)
+		}
+		// 另一个没标记的不该被顺带命中
+		if w := findNodeByPath(s.AppTree, "account-web.war"); w == nil || w.Type != "none" {
+			t.Errorf("没标记的 account-web.war 不该被匹配，实际 %+v", w)
+		}
+	})
+
+	t.Run("取消后回到原状", func(t *testing.T) {
+		s, err := app.ToggleWholeReplace(serverName)
+		if err != nil {
+			t.Fatalf("取消标记失败: %v", err)
+		}
+		if s.Total.Mod != 0 || s.Total.Add != 0 {
+			t.Errorf("取消标记后不该有映射，实际 %+v", s.Total)
+		}
+		if got := findNodeByPath(s.AppTree, "account-server.jar"); got == nil || got.Mapped {
+			t.Errorf("取消标记后 account-server.jar 不该还绑着，实际 %+v", got)
+		}
+	})
+
+	t.Run("非压缩包不能标记", func(t *testing.T) {
+		// 目录和普通文件都没有"整体替换"的说法
+		if _, err := app.ToggleWholeReplace(""); err == nil {
+			t.Error("空路径应当报错")
+		}
+	})
+}
+
+// TestRunPatchWritesWholeReplaceBytes 整体替换项要真的写进产物。
+//
+// 只断言"界面标了 MOD"是不够的 —— 写出环节另有一套分派（.jar 走
+// writeTreeNode2PackWithJar、其余靠 MappedNode），映射建对了但产物里
+// 还是旧字节的情况真出现过（见 TestSaveAppPackWritesReplacedWholeJar）。
+func TestRunPatchWritesWholeReplaceBytes(t *testing.T) {
+	dir := t.TempDir()
+	appJar := filepath.Join(dir, "app.war")
+	writeZip(t, appJar, map[string]string{
+		"account-server.jar": "APP-SERVER",
+		"keep.txt":           "KEEP",
+	})
+	patchZip := filepath.Join(dir, "patch.zip")
+	writeZip(t, patchZip, map[string]string{
+		"20261029_account-server_存量账户区分变更和普通.zip": "PATCH-SERVER",
+	})
+
+	app := newTestApp(t)
+	if _, err := app.OpenAppPack(appJar); err != nil {
+		t.Fatalf("打开应用包失败: %v", err)
+	}
+	if _, err := app.OpenPatchPack(patchZip); err != nil {
+		t.Fatalf("打开补丁包失败: %v", err)
+	}
+	if _, err := app.ToggleWholeReplace("20261029_account-server_存量账户区分变更和普通.zip"); err != nil {
+		t.Fatalf("标记整体替换失败: %v", err)
+	}
+
+	out := filepath.Join(dir, "out.war")
+	if _, err := app.RunPatch(out); err != nil {
+		t.Fatalf("打补丁失败: %v", err)
+	}
+
+	if got := readZipEntry(t, out, "account-server.jar"); got != "PATCH-SERVER" {
+		t.Errorf("产物里的 account-server.jar = %q，期望补丁侧的 PATCH-SERVER", got)
+	}
+	// 没被整体替换的条目保持原样
+	if got := readZipEntry(t, out, "keep.txt"); got != "KEEP" {
+		t.Errorf("keep.txt = %q，期望原样保留", got)
+	}
+}
+
+// TestUnmarkReadmeClearsState 压缩包被误标成说明文件后能取消，且状态清干净。
+//
+// 旧版本的「标记说明文件」只判了"非目录"，zip 也能标 —— 标完 README 被当
+// 文本解码，界面一片乱码（用户 2026-10-29 报的）。菜单项现在已经挡掉压缩包，
+// 这里测的是"已经标错的怎么退回来"：取消后 ReadmeNode 与 PatchSign.Readme
+// 都要清空，否则说明面板还挂着乱码、映射还按解析出来的假指令继续跑。
+func TestUnmarkReadmeClearsState(t *testing.T) {
+	dir := t.TempDir()
+	appJar := filepath.Join(dir, "app.jar")
+	writeZip(t, appJar, map[string]string{"a/x.class": "X"})
+	patchZip := filepath.Join(dir, "patch.zip")
+	writeZip(t, patchZip, map[string]string{
+		// 二进制内容：带 NUL，IsBinary 应当把它挡在解码之前
+		"inner.zip": "PK\x03\x04\x00\x00\x00\x00",
+	})
+
+	app := newTestApp(t)
+	if _, err := app.OpenAppPack(appJar); err != nil {
+		t.Fatalf("打开应用包失败: %v", err)
+	}
+	if _, err := app.OpenPatchPack(patchZip); err != nil {
+		t.Fatalf("打开补丁包失败: %v", err)
+	}
+
+	root := app.patchTreeInfo.RootNode()
+	inner := root.Children[0]
+	rootInfo := app.patchTreeInfo.RootInfoByNode(root)
+	if rootInfo == nil || rootInfo.PatchSign == nil {
+		t.Fatal("补丁根信息没建出来")
+	}
+
+	// 模拟旧版本的误标（现在菜单已经不给压缩包这一项了）
+	inner.Type = constant.TreeNodeTypeReadme
+	rootInfo.ReadmeNode = inner
+	app.refreshAllRoots(app.step())
+
+	if rootInfo.PatchSign.Readme != "" {
+		t.Errorf("二进制说明文件不该被解码，实际得到 %q", rootInfo.PatchSign.Readme)
+	}
+
+	if _, err := app.UnmarkReadme("inner.zip"); err != nil {
+		t.Fatalf("取消说明文件标记失败: %v", err)
+	}
+	if rootInfo.ReadmeNode != nil {
+		t.Errorf("取消后 ReadmeNode 应为 nil，实际 %q", rootInfo.ReadmeNode.Name)
+	}
+	if rootInfo.PatchSign.Readme != "" {
+		t.Errorf("取消后说明文本应清空，实际 %q", rootInfo.PatchSign.Readme)
+	}
+	if inner.Type != constant.TreeNodeTypeNone {
+		t.Errorf("取消后节点类型应回到 NONE，实际 %s", inner.Type)
 	}
 }
 
